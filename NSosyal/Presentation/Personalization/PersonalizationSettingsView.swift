@@ -83,7 +83,7 @@ struct PersonalizationSettingsView: View {
                 .padding(NSTheme.horizontalPadding)
             }
             .background(NSTheme.canvas)
-            .navigationTitle("Akışını yönet")
+            .navigationTitle("Tercihler ve gizlilik")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -113,12 +113,16 @@ struct PersonalizationSettingsView: View {
 
     private var learnedSummary: some View {
         HStack(spacing: 15) {
-            NexiOrb(size: 62)
+            Image(systemName: "sparkles.rectangle.stack.fill")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(NSTheme.blue)
+                .frame(width: 58, height: 58)
+                .background(NSTheme.blue.opacity(0.1), in: Circle())
             VStack(alignment: .leading, spacing: 6) {
-                Text("Nexi profili %\(Int(store.learningProgress * 100)) hazır")
+                Text("Akışın otomatik olarak güncellenir")
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(NSTheme.ink)
-                Text("Açık tercihlerin korunuyor. Öğrenilmiş seçenek ayrı bir akış olarak sunuluyor.")
+                Text("İlgi ve etkileşim sinyalleri arka planda birlikte değerlendirilir; ayrıca akış seçmen gerekmez.")
                     .font(.system(size: 12))
                     .foregroundStyle(NSTheme.mutedInk)
                     .lineSpacing(2)

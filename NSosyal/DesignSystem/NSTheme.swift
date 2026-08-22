@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum NSTheme {
     static let canvas = Color(red: 0.985, green: 0.986, blue: 0.978)
@@ -37,6 +38,27 @@ enum NSTheme {
 
     static let spring = Animation.spring(response: 0.38, dampingFraction: 0.86)
     static let gentleSpring = Animation.spring(response: 0.48, dampingFraction: 0.92)
+    static let bouncySpring = Animation.spring(response: 0.32, dampingFraction: 0.68)
+}
+
+enum NSHaptics {
+    static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred(intensity: style == .light ? 0.62 : 0.82)
+    }
+
+    static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        generator.selectionChanged()
+    }
+
+    static func notification(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(type)
+    }
 }
 
 struct SurfaceCardModifier: ViewModifier {
@@ -71,9 +93,15 @@ extension View {
 struct PressScaleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.965 : 1)
-            .opacity(configuration.isPressed ? 0.88 : 1)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.945 : 1)
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .brightness(configuration.isPressed ? -0.025 : 0)
+            .animation(NSTheme.bouncySpring, value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed {
+                    NSHaptics.impact(.light)
+                }
+            }
     }
 }
 
@@ -90,8 +118,14 @@ struct PrimaryButtonStyle: ButtonStyle {
                 isEnabled ? AnyShapeStyle(NSTheme.ink) : AnyShapeStyle(NSTheme.ink.opacity(0.28)),
                 in: Capsule()
             )
-            .scaleEffect(configuration.isPressed ? 0.975 : 1)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
+            .shadow(color: configuration.isPressed ? .clear : .black.opacity(0.08), radius: 10, y: 4)
+            .animation(NSTheme.bouncySpring, value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed, isEnabled {
+                    NSHaptics.impact(.medium)
+                }
+            }
     }
 }
 

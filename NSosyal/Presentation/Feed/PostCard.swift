@@ -174,6 +174,8 @@ struct PostCard: View {
                 Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(isSaved ? NSTheme.blue : NSTheme.mutedInk)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: isSaved)
                     .frame(width: 34, height: 34)
                     .contentShape(Rectangle())
             }
@@ -193,8 +195,10 @@ struct PostCard: View {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 17, weight: .semibold))
+                    .symbolEffect(.bounce, value: isLiked && icon.contains("heart"))
                 Text(compactNumber(value))
                     .font(.system(size: 11, weight: .semibold))
+                    .contentTransition(.numericText())
             }
             .foregroundStyle(color)
             .frame(minWidth: 47, minHeight: 34)
@@ -264,10 +268,6 @@ struct RecommendationReasonSheet: View {
                             dismiss()
                         }
 
-                        controlButton(icon: "slider.horizontal.3", title: "Akış ayarlarını düzenle", color: NSTheme.blue) {
-                            store.selectedTab = .profile
-                            dismiss()
-                        }
                     }
 
                     Text("Saat bilgisi ve içerikte kalma süresi tek başına karar vermez; açık tercihlerin her zaman daha güçlü sinyaldir.")

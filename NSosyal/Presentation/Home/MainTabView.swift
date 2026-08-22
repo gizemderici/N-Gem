@@ -21,7 +21,7 @@ struct MainTabView: View {
                     .zIndex(5)
             }
         }
-        .animation(reduceMotion ? .easeInOut(duration: 0.12) : NSTheme.spring, value: store.selectedTab)
+        .animation(reduceMotion ? .easeInOut(duration: 0.12) : NSTheme.bouncySpring, value: store.selectedTab)
         .animation(.easeInOut(duration: 0.2), value: store.toastMessage)
         .sheet(item: $store.selectedReasonPost) { post in
             RecommendationReasonSheet(post: post)
@@ -49,7 +49,7 @@ struct MainTabView: View {
         HStack(spacing: 0) {
             ForEach(AppTab.allCases) { tab in
                 Button {
-                    withAnimation(reduceMotion ? nil : NSTheme.spring) {
+                    withAnimation(reduceMotion ? nil : NSTheme.bouncySpring) {
                         store.selectedTab = tab
                     }
                 } label: {

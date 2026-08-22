@@ -134,21 +134,17 @@ struct ProfileView: View {
             showsPersonalization = true
         } label: {
             HStack(spacing: 13) {
-                NexiOrb(size: 50)
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(NSTheme.blue)
+                    .frame(width: 50, height: 50)
+                    .background(NSTheme.blue.opacity(0.1), in: Circle())
 
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text("Akışını yönet")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(NSTheme.ink)
-                        Text("%\(Int(store.learningProgress * 100))")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(NSTheme.blue)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(NSTheme.blue.opacity(0.09), in: Capsule())
-                    }
-                    Text("İlgi alanlarını, zaman tercihlerini ve Nexi’nin öğrendiklerini gör.")
+                    Text("Gizlilik ve tercihler")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(NSTheme.ink)
+                    Text("İlgi alanlarını, bildirimleri ve veri kontrollerini yönet.")
                         .font(.system(size: 11))
                         .foregroundStyle(NSTheme.mutedInk)
                         .multilineTextAlignment(.leading)

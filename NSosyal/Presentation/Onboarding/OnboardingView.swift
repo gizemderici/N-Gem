@@ -258,7 +258,7 @@ struct OnboardingView: View {
 
                 VStack(spacing: 10) {
                     previewPromise(icon: "eye.fill", color: NSTheme.cyan, title: "Neden gösterildiğini gör", detail: "Her önerinin kısa ve anlaşılır bir nedeni olacak.")
-                    previewPromise(icon: "arrow.uturn.backward", color: NSTheme.blue, title: "İstediğin an geri dön", detail: "Benim Akışım her zaman korunacak.")
+                    previewPromise(icon: "arrow.triangle.2.circlepath", color: NSTheme.blue, title: "Akış zamanla uyum sağlar", detail: "Ayrıca bir akış seçmeden, kullanım bağlamına göre dengeli biçimde güncellenir.")
                     previewPromise(icon: "trash.slash", color: NSTheme.violet, title: "Öğrenileni sen yönet", detail: "Duraklat, düzelt veya tamamen sıfırla.")
                 }
 

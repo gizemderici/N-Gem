@@ -40,58 +40,11 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
-enum FeedVariant: String, CaseIterable, Identifiable {
-    case mine
-    case nexi
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .mine: "Benim Akışım"
-        case .nexi: "Nexi Akışı"
-        }
-    }
-}
-
-enum IntentMode: String, CaseIterable, Identifiable {
-    case automatic
+enum IntentMode: String {
     case fun
     case agenda
     case learn
     case local
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .automatic: "Otomatik"
-        case .fun: "Eğlen"
-        case .agenda: "Gündem"
-        case .learn: "Öğren"
-        case .local: "Çevrem"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .automatic: "sparkles"
-        case .fun: "face.smiling"
-        case .agenda: "newspaper"
-        case .learn: "lightbulb"
-        case .local: "location"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .automatic: NSTheme.blue
-        case .fun: NSTheme.violet
-        case .agenda: NSTheme.coral
-        case .learn: NSTheme.green
-        case .local: NSTheme.amber
-        }
-    }
 }
 
 struct Interest: Identifiable, Hashable {
@@ -159,6 +112,17 @@ struct SocialPost: Identifiable, Hashable {
     var shareCount: Int
 }
 
+struct SocialStory: Identifiable, Hashable {
+    let id: String
+    let creator: Creator
+    let style: ArtworkStyle
+    let headline: String
+    let detail: String
+    let time: String
+    let isSeen: Bool
+    let isOwn: Bool
+}
+
 enum NotificationKind: String, Hashable {
     case liked
     case followed
@@ -195,8 +159,6 @@ struct SocialNotification: Identifiable, Hashable {
 
 enum FeedEventName: String {
     case sessionStarted = "session_started"
-    case intentSelected = "intent_selected"
-    case feedChanged = "feed_changed"
     case contentImpression = "content_impression"
     case contentLiked = "content_liked"
     case contentSaved = "content_saved"

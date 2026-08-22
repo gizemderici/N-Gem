@@ -23,6 +23,15 @@ enum MockSocialData {
         isVerified: true
     )
 
+    static let currentUser = Creator(
+        id: "furkan",
+        name: "Furkan Durmaz",
+        handle: "@furkandurmaz",
+        initials: "FD",
+        colors: [NSTheme.cyan, NSTheme.blue, NSTheme.violet],
+        isVerified: true
+    )
+
     static let mert = Creator(
         id: "mert",
         name: "Mert Arslan",
@@ -49,6 +58,59 @@ enum MockSocialData {
         colors: [NSTheme.green, NSTheme.cyan],
         isVerified: true
     )
+
+    static let stories: [SocialStory] = [
+        .init(
+            id: "story-me",
+            creator: currentUser,
+            style: .future,
+            headline: "Hikâyeni paylaş",
+            detail: "Günün anını topluluğunla paylaş.",
+            time: "Şimdi",
+            isSeen: false,
+            isOwn: true
+        ),
+        .init(
+            id: "story-ayse",
+            creator: ayse,
+            style: .comedy,
+            headline: "Kahve molasına yetişenler burada mı?",
+            detail: "Bugünün küçük gülümseme payı ☕️",
+            time: "8 dk",
+            isSeen: false,
+            isOwn: false
+        ),
+        .init(
+            id: "story-mert",
+            creator: mert,
+            style: .learning,
+            headline: "Bir ekranı sadeleştirmenin üç yolu",
+            detail: "Bugünkü tasarım masasından kısa bir not.",
+            time: "24 dk",
+            isSeen: false,
+            isOwn: false
+        ),
+        .init(
+            id: "story-tech",
+            creator: teknoloji,
+            style: .future,
+            headline: "Günün teknoloji özeti",
+            detail: "Beş gelişme, yalnızca iki dakika.",
+            time: "41 dk",
+            isSeen: false,
+            isOwn: false
+        ),
+        .init(
+            id: "story-istanbul",
+            creator: istanbul,
+            style: .city,
+            headline: "İstanbul bu akşam",
+            detail: "Şehirde bugün kaçırmaman gereken üç etkinlik.",
+            time: "1 sa",
+            isSeen: true,
+            isOwn: false
+        )
+    ]
 
     static let posts: [SocialPost] = [
         SocialPost(

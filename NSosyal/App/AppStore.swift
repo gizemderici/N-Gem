@@ -4,8 +4,6 @@ import SwiftUI
 @MainActor
 final class AppStore: ObservableObject {
     @Published var selectedTab: AppTab = .home
-    @Published var feedVariant: FeedVariant = .mine
-    @Published var intentMode: IntentMode = .automatic
     @Published var selectedInterestIDs: [String] = ["technology", "design", "education"]
     @Published var likedPostIDs: Set<String> = []
     @Published var savedPostIDs: Set<String> = ["long-learning"]
@@ -13,25 +11,16 @@ final class AppStore: ObservableObject {
     @Published var hiddenPostIDs: Set<String> = []
     @Published var selectedReasonPost: SocialPost?
     @Published var toastMessage: String?
-    @Published var learningProgress: Double = 0.64
 
     let posts = MockSocialData.posts
     let notifications = MockSocialData.notifications
 
     var visiblePosts: [SocialPost] {
         let available = posts.filter { !hiddenPostIDs.contains($0.id) }
-        let reordered: [SocialPost]
-
-        if feedVariant == .nexi || intentMode != .automatic {
-            reordered = available.sorted { score(for: $0) > score(for: $1) }
-        } else {
-            reordered = available
-        }
-
-        return reordered
+        return available.sorted { score(for: $0) > score(for: $1) }
     }
 
-    var recommendedIntent: IntentMode {
+    private var contextualIntent: IntentMode {
         let hour = Calendar.current.component(.hour, from: Date())
         return switch hour {
         case 6..<9: .agenda
@@ -46,36 +35,30 @@ final class AppStore: ObservableObject {
         track(.sessionStarted, context: ["source": "onboarding_complete"])
     }
 
-    func selectIntent(_ intent: IntentMode) {
-        withAnimation(NSTheme.spring) {
-            intentMode = intent
-        }
-        track(.intentSelected, context: ["intent": intent.rawValue])
-    }
-
-    func selectFeed(_ feed: FeedVariant) {
-        withAnimation(NSTheme.spring) {
-            feedVariant = feed
-        }
-        track(.feedChanged, context: ["feed": feed.rawValue])
-    }
-
     func toggleLike(_ post: SocialPost) {
-        if likedPostIDs.contains(post.id) {
-            likedPostIDs.remove(post.id)
-        } else {
-            likedPostIDs.insert(post.id)
-            track(.contentLiked, contentID: post.id)
+        withAnimation(NSTheme.bouncySpring) {
+            if likedPostIDs.contains(post.id) {
+                likedPostIDs.remove(post.id)
+                NSHaptics.selection()
+            } else {
+                likedPostIDs.insert(post.id)
+                NSHaptics.notification(.success)
+                track(.contentLiked, contentID: post.id)
+            }
         }
     }
 
     func toggleSave(_ post: SocialPost) {
-        if savedPostIDs.contains(post.id) {
-            savedPostIDs.remove(post.id)
-        } else {
-            savedPostIDs.insert(post.id)
-            showToast("Gönderi kaydedildi")
-            track(.contentSaved, contentID: post.id)
+        withAnimation(NSTheme.bouncySpring) {
+            if savedPostIDs.contains(post.id) {
+                savedPostIDs.remove(post.id)
+                NSHaptics.selection()
+            } else {
+                savedPostIDs.insert(post.id)
+                NSHaptics.notification(.success)
+                showToast("Gönderi kaydedildi")
+                track(.contentSaved, contentID: post.id)
+            }
         }
     }
 
@@ -83,6 +66,7 @@ final class AppStore: ObservableObject {
         withAnimation(NSTheme.spring) {
             _ = hiddenPostIDs.insert(post.id)
         }
+        NSHaptics.notification(.warning)
         showToast("Bu gönderiyi daha az göstereceğiz")
         track(.contentHidden, contentID: post.id)
     }
@@ -93,25 +77,28 @@ final class AppStore: ObservableObject {
     }
 
     func toggleFollow(_ creator: Creator) {
-        if followedCreatorIDs.contains(creator.id) {
-            followedCreatorIDs.remove(creator.id)
-        } else {
-            followedCreatorIDs.insert(creator.id)
-            showToast("\(creator.name) takip edildi")
+        withAnimation(NSTheme.bouncySpring) {
+            if followedCreatorIDs.contains(creator.id) {
+                followedCreatorIDs.remove(creator.id)
+                NSHaptics.selection()
+            } else {
+                followedCreatorIDs.insert(creator.id)
+                NSHaptics.notification(.success)
+                showToast("\(creator.name) takip edildi")
+            }
         }
     }
 
     func publish(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         track(.postPublished, context: ["format": "text"])
+        NSHaptics.notification(.success)
         showToast("Gönderin yayınlandı")
         selectedTab = .home
     }
 
     func resetLearnedProfile() {
-        intentMode = .automatic
-        feedVariant = .mine
-        learningProgress = 0
+        NSHaptics.notification(.success)
         showToast("Öğrenilmiş profil sıfırlandı")
     }
 
@@ -136,8 +123,7 @@ final class AppStore: ObservableObject {
         if followedCreatorIDs.contains(post.creator.id) { value += 25 }
         if savedPostIDs.contains(post.id) { value += 12 }
 
-        let effectiveIntent = intentMode == .automatic ? recommendedIntent : intentMode
-        switch effectiveIntent {
+        switch contextualIntent {
         case .fun where post.topic == "Mizah": value += 45
         case .agenda where post.topic == "Gündem": value += 45
         case .learn where ["Teknoloji", "Eğitim", "Tasarım"].contains(post.topic): value += 35
