@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeFeedView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showsLearningDetails = false
+    @State private var showsFeedFilters = false
 
     var body: some View {
         ZStack {
@@ -17,22 +18,8 @@ struct HomeFeedView: View {
                     FeedSegmentedControl()
                         .padding(.horizontal, NSTheme.horizontalPadding)
 
-                    VStack(alignment: .leading, spacing: 9) {
-                        HStack {
-                            Text("Şu an ne istiyorsun?")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(NSTheme.mutedInk)
-                            Spacer()
-                            if store.intentMode == .automatic {
-                                Text("Öneri: \(store.recommendedIntent.title)")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(store.recommendedIntent.color)
-                            }
-                        }
+                    feedFilterControl
                         .padding(.horizontal, NSTheme.horizontalPadding)
-
-                        IntentModeStrip()
-                    }
 
                     learningCard
                         .padding(.horizontal, NSTheme.horizontalPadding)
@@ -57,6 +44,10 @@ struct HomeFeedView: View {
         }
         .sheet(isPresented: $showsLearningDetails) {
             LearningStatusSheet()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showsFeedFilters) {
+            HomeFeedFilterSheet()
                 .environmentObject(store)
         }
     }
@@ -136,6 +127,46 @@ struct HomeFeedView: View {
         }
         .pressScale()
         .accessibilityLabel("Nexi öğrenme durumu yüzde \(Int(store.learningProgress * 100))")
+    }
+
+    private var feedFilterControl: some View {
+        Button {
+            showsFeedFilters = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(store.intentMode.color)
+                    .frame(width: 42, height: 42)
+                    .background(store.intentMode.color.opacity(0.1), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Akış filtresi")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(NSTheme.mutedInk)
+                    Text(store.intentMode == .automatic
+                         ? "Otomatik · Öneri: \(store.recommendedIntent.title)"
+                         : store.intentMode.title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(NSTheme.ink)
+                }
+
+                Spacer()
+
+                Text(store.feedVariant.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NSTheme.mutedInk)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(NSTheme.subtleInk)
+            }
+            .padding(11)
+            .surfaceCard(radius: 20)
+        }
+        .pressScale()
+        .accessibilityLabel("Akış filtreleri, \(store.intentMode.title), \(store.feedVariant.title)")
     }
 
     private var endOfFeedCard: some View {

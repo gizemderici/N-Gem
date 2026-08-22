@@ -4,6 +4,7 @@ struct ExploreView: View {
     @EnvironmentObject private var store: AppStore
     @State private var query = ""
     @State private var selectedTopic = "Tümü"
+    @State private var showsFilters = false
 
     private let topics = ["Tümü", "Teknoloji", "Tasarım", "Yerel", "Mizah", "Eğitim"]
 
@@ -28,10 +29,8 @@ struct ExploreView: View {
                         .padding(.horizontal, NSTheme.horizontalPadding)
                         .padding(.top, 8)
 
-                    searchField
+                    searchAndFilterBar
                         .padding(.horizontal, NSTheme.horizontalPadding)
-
-                    topicStrip
 
                     if query.isEmpty && selectedTopic == "Tümü" {
                         trendingHero
@@ -75,6 +74,9 @@ struct ExploreView: View {
             }
             .scrollIndicators(.hidden)
         }
+        .sheet(isPresented: $showsFilters) {
+            ExploreFilterSheet(selectedTopic: $selectedTopic, topics: topics)
+        }
     }
 
     private var header: some View {
@@ -94,60 +96,55 @@ struct ExploreView: View {
         }
     }
 
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(NSTheme.mutedInk)
+    private var searchAndFilterBar: some View {
+        HStack(spacing: 9) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(NSTheme.mutedInk)
 
-            TextField("Kişi, konu veya topluluk ara", text: $query)
-                .font(.system(size: 14))
-                .textInputAutocapitalization(.never)
+                TextField("Kişi, konu veya topluluk ara", text: $query)
+                    .font(.system(size: 14))
+                    .textInputAutocapitalization(.never)
 
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(NSTheme.subtleInk)
-                }
-                .accessibilityLabel("Aramayı temizle")
-            }
-        }
-        .padding(.horizontal, 15)
-        .frame(height: 50)
-        .background(Color.white, in: Capsule())
-        .overlay { Capsule().stroke(NSTheme.border, lineWidth: 1) }
-    }
-
-    private var topicStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(topics, id: \.self) { topic in
+                if !query.isEmpty {
                     Button {
-                        withAnimation(NSTheme.spring) {
-                            selectedTopic = topic
-                        }
+                        query = ""
                     } label: {
-                        Text(topic)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(selectedTopic == topic ? .white : NSTheme.ink)
-                            .padding(.horizontal, 14)
-                            .frame(height: 36)
-                            .background(
-                                selectedTopic == topic ? NSTheme.ink : Color.white,
-                                in: Capsule()
-                            )
-                            .overlay {
-                                Capsule().stroke(selectedTopic == topic ? .clear : NSTheme.border, lineWidth: 1)
-                            }
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(NSTheme.subtleInk)
                     }
-                    .pressScale()
+                    .accessibilityLabel("Aramayı temizle")
                 }
             }
-            .padding(.horizontal, NSTheme.horizontalPadding)
+            .padding(.horizontal, 15)
+            .frame(height: 50)
+            .background(Color.white, in: Capsule())
+            .overlay { Capsule().stroke(NSTheme.border, lineWidth: 1) }
+
+            Button {
+                showsFilters = true
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(selectedTopic == "Tümü" ? NSTheme.ink : .white)
+                        .frame(width: 50, height: 50)
+                        .background(selectedTopic == "Tümü" ? Color.white : NSTheme.ink, in: Circle())
+                        .overlay { Circle().stroke(NSTheme.border, lineWidth: 1) }
+
+                    if selectedTopic != "Tümü" {
+                        Circle()
+                            .fill(NSTheme.coral)
+                            .frame(width: 10, height: 10)
+                            .overlay { Circle().stroke(Color.white, lineWidth: 2) }
+                            .offset(x: 1, y: 1)
+                    }
+                }
+            }
+            .pressScale()
+            .accessibilityLabel("Keşfet filtreleri, \(selectedTopic)")
         }
-        .scrollIndicators(.hidden)
     }
 
     private var trendingHero: some View {

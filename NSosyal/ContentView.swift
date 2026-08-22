@@ -8,8 +8,14 @@
 import SwiftUI
 
 struct ContentView: View {
+    @AppStorage("nsosyal.authentication.completed") private var hasAuthenticated = false
     @AppStorage("nsosyal.onboarding.completed") private var hasCompletedOnboarding = false
     @StateObject private var store = AppStore()
+
+    private var skipsAuthenticationForDevelopment: Bool {
+        ProcessInfo.processInfo.arguments.contains("-skipAuthentication")
+            || ProcessInfo.processInfo.arguments.contains("-skipOnboarding")
+    }
 
     private var skipsOnboardingForDevelopment: Bool {
         ProcessInfo.processInfo.arguments.contains("-skipOnboarding")
@@ -17,7 +23,14 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            if hasCompletedOnboarding || skipsOnboardingForDevelopment {
+            if !hasAuthenticated && !skipsAuthenticationForDevelopment {
+                AuthenticationView {
+                    withAnimation(NSTheme.gentleSpring) {
+                        hasAuthenticated = true
+                    }
+                }
+                .transition(.opacity)
+            } else if hasCompletedOnboarding || skipsOnboardingForDevelopment {
                 MainTabView()
                     .environmentObject(store)
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))

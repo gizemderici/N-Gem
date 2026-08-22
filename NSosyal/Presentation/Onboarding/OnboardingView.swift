@@ -6,6 +6,7 @@ struct OnboardingView: View {
 
     @State private var step = 0
     @State private var selectedInterestIDs: [String] = []
+    @State private var showsInterestFilter = false
 
     let onComplete: () -> Void
 
@@ -41,6 +42,9 @@ struct OnboardingView: View {
         }
         .preferredColorScheme(.light)
         .animation(reduceMotion ? .easeInOut(duration: 0.15) : NSTheme.spring, value: step)
+        .sheet(isPresented: $showsInterestFilter) {
+            InterestFilterSheet(selectedInterestIDs: $selectedInterestIDs)
+        }
     }
 
     private var decorativeBackground: some View {
@@ -154,14 +158,7 @@ struct OnboardingView: View {
             .padding(.bottom, 18)
 
             ScrollView {
-                LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible())],
-                    spacing: 11
-                ) {
-                    ForEach(MockSocialData.interests) { interest in
-                        interestButton(interest)
-                    }
-                }
+                interestFilterCard
                 .padding(.horizontal, NSTheme.horizontalPadding)
                 .padding(.bottom, 18)
 
@@ -182,6 +179,65 @@ struct OnboardingView: View {
             .padding(.horizontal, NSTheme.horizontalPadding)
             .padding(.vertical, 12)
         }
+    }
+
+    private var interestFilterCard: some View {
+        Button {
+            showsInterestFilter = true
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(NSTheme.blue)
+                        .frame(width: 46, height: 46)
+                        .background(NSTheme.blue.opacity(0.1), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("İlgi alanı filtresi")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(NSTheme.ink)
+                        Text(selectedInterestIDs.isEmpty
+                             ? "Kategorileri tek bir yerden seç"
+                             : "\(selectedInterestIDs.count) alan seçildi")
+                            .font(.system(size: 12))
+                            .foregroundStyle(NSTheme.mutedInk)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(NSTheme.subtleInk)
+                }
+
+                if !selectedInterestIDs.isEmpty {
+                    HStack(spacing: 7) {
+                        ForEach(selectedInterestIDs.prefix(4), id: \.self) { id in
+                            if let interest = MockSocialData.interests.first(where: { $0.id == id }) {
+                                Image(systemName: interest.icon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(interest.color)
+                                    .frame(width: 31, height: 31)
+                                    .background(interest.color.opacity(0.1), in: Circle())
+                            }
+                        }
+
+                        if selectedInterestIDs.count > 4 {
+                            Text("+\(selectedInterestIDs.count - 4)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(NSTheme.mutedInk)
+                                .frame(width: 31, height: 31)
+                                .background(NSTheme.elevatedSurface, in: Circle())
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .surfaceCard(radius: 22, shadow: true)
+        }
+        .pressScale()
     }
 
     private var previewStep: some View {
