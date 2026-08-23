@@ -49,9 +49,11 @@ fun Route.searchRoutes(service: SearchService, limiter: RequestRateLimiter) {
         }
 
         get("/api/v1/explore") {
+            val viewerId = call.authenticatedUserId()
+            limiter.check("explore:$viewerId")
             call.respond(
                 service.explore(
-                    viewerId = call.authenticatedUserId(),
+                    viewerId = viewerId,
                     rawCursor = call.request.queryParameters["cursor"],
                     requestedLimit = call.request.queryParameters["limit"]?.toIntOrNull(),
                 )

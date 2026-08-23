@@ -613,6 +613,29 @@ LONGQ=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=$(head -c 150 /dev/zero | tr '\
 EXPL=$(ca "$TOK_A" "$BASE/api/v1/explore?limit=5")
 printf '%s' "$EXPL" | grep -q '"items"' && ok "kesfet sorgu almadan calisti" || bad "kesfet" "$EXPL"
 
+# Gercek PostgreSQL sorgusunda puan zamani ilk sayfada sabit kalmali. Eski
+# `now()` hesabi bir saniye sonra ilk ogenin puanini dusurup onu tekrar
+# ikinci sayfaya aliyordu.
+EXPL1=$(ca "$TOK_A" "$BASE/api/v1/explore?limit=1")
+EXPL1_ID=$(printf '%s' "$EXPL1" | grep -o '"items":\[{"id":"[^"]*"' | head -1 | sed 's/.*"id":"//;s/"$//')
+EXPL_CUR=$(printf '%s' "$EXPL1" | field nextCursor)
+sleep 1
+EXPL2=$(ca "$TOK_A" "$BASE/api/v1/explore?limit=1&cursor=$EXPL_CUR")
+EXPL2_ID=$(printf '%s' "$EXPL2" | grep -o '"items":\[{"id":"[^"]*"' | head -1 | sed 's/.*"id":"//;s/"$//')
+[ -n "$EXPL1_ID" ] && [ -n "$EXPL2_ID" ] && [ "$EXPL1_ID" != "$EXPL2_ID" ] \
+  && ok "kesfet gercek SQL'de sayfalar arasinda tekrar etmiyor" \
+  || bad "kesfet imlecinde tekrar" "ilk=$EXPL1_ID ikinci=$EXPL2_ID ilkCevap=$EXPL1 ikinciCevap=$EXPL2"
+
+PERCENT_SEARCH=$(ca "$TOK_A" "$BASE/api/v1/search/users?q=%25")
+printf '%s' "$PERCENT_SEARCH" | grep -q '"username"' \
+  && bad "yuzde isareti SQL jokerine donustu" "$PERCENT_SEARCH" \
+  || ok "yuzde isareti kullanici aramasinda duz karakter"
+
+UNDERSCORE_SEARCH=$(ca "$TOK_A" "$BASE/api/v1/search/users?q=%5F")
+printf '%s' "$UNDERSCORE_SEARCH" | grep -q '"username"' \
+  && bad "alt cizgi SQL jokerine donustu" "$UNDERSCORE_SEARCH" \
+  || ok "alt cizgi kullanici aramasinda duz karakter"
+
 # Engellenen kullanicinin gonderisi aramada cikmamali
 ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/block" >/dev/null
 BSRCH=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=kullanicisinin")

@@ -145,7 +145,7 @@ private object EmptyPostRepository : PostRepository {
         cursor: RankedPostCursor?,
         limit: Int,
     ): List<RankedPost> = unsupported()
-    override fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost> = unsupported()
+    override fun explore(viewerId: UUID, rankedAt: Instant, cursor: RankedPostCursor?, limit: Int): List<RankedPost> = unsupported()
 }
 
 private fun <T> unsupported(): T = throw UnsupportedOperationException("Testte kullanılmıyor")

@@ -28,7 +28,7 @@ class SearchServiceTest {
     private val storage = FakeObjectStorage()
     private val posts = PostService(postRepository, storage, clock)
     private val searchRepository = FakeSearchRepository()
-    private val service = SearchService(postRepository, searchRepository, storage)
+    private val service = SearchService(postRepository, searchRepository, storage, clock)
 
     private fun publish(text: String) = posts.create(viewerId, CreatePostRequest(text = text))
 
@@ -55,6 +55,14 @@ class SearchServiceTest {
         assertEquals("INVALID_CURSOR", assertFailsWith<ApiException> {
             service.searchPosts(viewerId, "kotlin", "bozuk-imlec", null)
         }.code)
+    }
+
+    @Test
+    fun `username prefix escapes SQL wildcard characters`() {
+        assertEquals("giz%", "giz".escapeLikePrefix())
+        assertEquals("\\%%", "%".escapeLikePrefix())
+        assertEquals("\\_%", "_".escapeLikePrefix())
+        assertEquals("\\\\%", "\\".escapeLikePrefix())
     }
 
     // --------------------------------------------------------------- arama
@@ -166,6 +174,42 @@ class SearchServiceTest {
         assertEquals(5, ids.size)
         assertEquals(ids.distinct().size, ids.size)
         assertNull(third.nextCursor)
+    }
+
+    @Test
+    fun `explore keeps the first page ranking time in later cursors`() {
+        repeat(5) { index ->
+            val post = publish("Sabit an $index")
+            repeat(index + 1) { postRepository.setLike(UUID.fromString(post.id), UUID.randomUUID(), true, now) }
+        }
+
+        val first = service.explore(viewerId, null, 2)
+        val firstCursor = SearchService.decodeExploreCursor(assertNotNull(first.nextCursor))
+        assertEquals(now, firstCursor.rankedAt)
+
+        val oneHourLater = SearchService(
+            postRepository,
+            searchRepository,
+            storage,
+            Clock.fixed(now.plusSeconds(3_600), ZoneOffset.UTC),
+        )
+        val second = oneHourLater.explore(viewerId, first.nextCursor, 2)
+        val secondCursor = SearchService.decodeExploreCursor(assertNotNull(second.nextCursor))
+
+        assertEquals(now, secondCursor.rankedAt)
+        assertTrue(first.items.map { it.id }.toSet().intersect(second.items.map { it.id }.toSet()).isEmpty())
+    }
+
+    @Test
+    fun `ranked cursor preserves sub millisecond timestamp precision`() {
+        val createdAt = Instant.parse("2026-08-23T00:00:00.123456789Z")
+        val id = UUID.randomUUID()
+
+        val decoded = SearchService.decodeCursor(SearchService.encodeCursor(0.6931471805599453, createdAt, id))
+
+        assertEquals(createdAt, decoded.createdAt)
+        assertEquals(id, decoded.id)
+        assertEquals(0.6931471805599453, decoded.rank)
     }
 
     @Test

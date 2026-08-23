@@ -12,6 +12,7 @@ import com.nexi.posts.toResponse
 import com.nexi.topics.toResponse
 import io.ktor.http.HttpStatusCode
 import java.nio.charset.StandardCharsets
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -21,6 +22,7 @@ class SearchService(
     private val posts: PostRepository,
     private val repository: SearchRepository,
     private val storage: ObjectStorage,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val mediaUrlExpiry: Duration = Duration.ofMinutes(15)
 
@@ -64,13 +66,15 @@ class SearchService(
     /** Keşfet sorgu almaz; popülerlik ve güncellik karışımıyla sıralanır. */
     fun explore(viewerId: UUID, rawCursor: String?, requestedLimit: Int?): ExploreResponse {
         val limit = pageSize(requestedLimit)
-        val rows = posts.explore(viewerId, rawCursor?.let { decodePostCursor(it) }, limit + 1)
+        val cursor = rawCursor?.let { decodeExploreCursor(it) }
+        val rankedAt = cursor?.rankedAt ?: clock.instant()
+        val rows = posts.explore(viewerId, rankedAt, cursor?.ranked?.toPostCursor(), limit + 1)
         val hasMore = rows.size > limit
         val items = rows.take(limit)
 
         return ExploreResponse(
             items = items.map { it.toResponse() },
-            nextCursor = if (hasMore) items.lastOrNull()?.let { it.cursorString() } else null,
+            nextCursor = if (hasMore) items.lastOrNull()?.let { it.exploreCursorString(rankedAt) } else null,
         )
     }
 
@@ -110,6 +114,9 @@ class SearchService(
     private fun RankedPost.cursorString(): String =
         encodeCursor(rank, details.post.createdAt, details.post.id)
 
+    private fun RankedPost.exploreCursorString(rankedAt: Instant): String =
+        encodeExploreCursor(rankedAt, rank, details.post.createdAt, details.post.id)
+
     companion object {
         const val MAX_QUERY_LENGTH = 100
         const val DEFAULT_PAGE_SIZE = 20
@@ -126,18 +133,36 @@ class SearchService(
          * `Double.toString` en kısa tam-dönüşlü gösterimi verir.
          */
         internal fun encodeCursor(rank: Double, createdAt: Instant, id: UUID): String {
-            val raw = "$rank|${createdAt.toEpochMilli()}|$id"
+            val raw = "$rank|$createdAt|$id"
             return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
         }
 
         internal fun decodeCursor(rawCursor: String): RankedCursor = try {
             val parts = String(Base64.getUrlDecoder().decode(rawCursor), StandardCharsets.UTF_8).split('|', limit = 3)
-            RankedCursor(parts[0].toDouble(), Instant.ofEpochMilli(parts[1].toLong()), UUID.fromString(parts[2]))
+            RankedCursor(parts[0].toDouble(), Instant.parse(parts[1]), UUID.fromString(parts[2]))
         } catch (_: Throwable) {
             throw ApiException(HttpStatusCode.BadRequest, "INVALID_CURSOR", "Liste imleci geçersiz.", "cursor")
         }
 
         internal fun decodePostCursor(rawCursor: String): RankedPostCursor =
-            decodeCursor(rawCursor).let { RankedPostCursor(it.rank, it.createdAt, it.id) }
+            decodeCursor(rawCursor).toPostCursor()
+
+        internal fun encodeExploreCursor(rankedAt: Instant, rank: Double, createdAt: Instant, id: UUID): String {
+            val raw = "$rankedAt|$rank|$createdAt|$id"
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
+        }
+
+        internal fun decodeExploreCursor(rawCursor: String): ExploreCursor = try {
+            val parts = String(Base64.getUrlDecoder().decode(rawCursor), StandardCharsets.UTF_8).split('|', limit = 4)
+            ExploreCursor(
+                rankedAt = Instant.parse(parts[0]),
+                ranked = RankedCursor(parts[1].toDouble(), Instant.parse(parts[2]), UUID.fromString(parts[3])),
+            )
+        } catch (_: Throwable) {
+            throw ApiException(HttpStatusCode.BadRequest, "INVALID_CURSOR", "Liste imleci geçersiz.", "cursor")
+        }
+
     }
 }
+
+private fun RankedCursor.toPostCursor() = RankedPostCursor(rank, createdAt, id)

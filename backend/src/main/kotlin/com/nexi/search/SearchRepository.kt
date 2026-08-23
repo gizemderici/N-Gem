@@ -34,7 +34,7 @@ class JdbcSearchRepository(private val dataSource: DataSource) : SearchRepositor
                      FROM users u
                      LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'
                      WHERE (u.search_vector @@ websearch_to_tsquery('turkish_simple', ?)
-                            OR u.username_normalized LIKE ? || '%')
+                            OR u.username_normalized LIKE ? ESCAPE E'\\')
                        AND ${BlockFilter.notBlocked("u.id")}
                    ) ranked
                    $cursorClause
@@ -46,7 +46,7 @@ class JdbcSearchRepository(private val dataSource: DataSource) : SearchRepositor
                 statement.setString(index++, query)
                 statement.setString(index++, normalized)
                 statement.setString(index++, query)
-                statement.setString(index++, normalized)
+                statement.setString(index++, normalized.escapeLikePrefix())
                 repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
                 if (cursor != null) {
                     statement.setDouble(index++, cursor.rank)
@@ -94,6 +94,10 @@ class JdbcSearchRepository(private val dataSource: DataSource) : SearchRepositor
         }
     }
 }
+
+/** `%` ve `_` kullanıcı girdisinde SQL jokeri değil, düz karakterdir. */
+internal fun String.escapeLikePrefix(): String =
+    replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 /** Ortak alan; imleç kodlaması için. */
 internal fun SearchUser.cursor() = RankedCursor(rank, createdAt, id)

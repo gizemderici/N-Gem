@@ -11,10 +11,13 @@ import java.util.UUID
  *
  * Sıralama `(rank, createdAt, id)` üçlüsüne göre olduğu için imleç de üçünü
  * birden taşımak zorunda; yalnızca zaman damgası taşısaydı alaka sırası
- * sayfa sınırında bozulurdu. `rank` sabit ondalıkla yazılıyor ki kodlama
- * ile karşılaştırma aynı değeri görsün.
+ * sayfa sınırında bozulurdu. Puan ve zaman damgası imleçte kayıpsız metin
+ * olarak tutulur; yuvarlama sayfalar arasında tekrar ya da atlama üretirdi.
  */
 data class RankedCursor(val rank: Double, val createdAt: Instant, val id: UUID)
+
+/** Keşfet puanının hesaplandığı sabit anı da taşıyan imleç. */
+data class ExploreCursor(val rankedAt: Instant, val ranked: RankedCursor)
 
 data class SearchUser(
     val id: UUID,

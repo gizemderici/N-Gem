@@ -137,10 +137,14 @@ internal class InMemoryPostRepository(
             .take(limit)
     }
 
-    override fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost> = published()
+    override fun explore(viewerId: UUID, rankedAt: Instant, cursor: RankedPostCursor?, limit: Int): List<RankedPost> = published()
+        .filter { it.createdAt <= rankedAt }
         .map { post ->
             val likeCount = likes.count { it.first == post.id }
-            RankedPost(details(post, viewerId), kotlin.math.ln(1.0 + likeCount))
+            val ageSeconds = java.time.Duration.between(post.createdAt, rankedAt).seconds.coerceAtLeast(0)
+            val rank = kotlin.math.ln(1.0 + likeCount) *
+                kotlin.math.exp(-ageSeconds / EXPLORE_HALF_LIFE_SECONDS)
+            RankedPost(details(post, viewerId), rank)
         }
         .afterRankedCursor(cursor)
         .take(limit)

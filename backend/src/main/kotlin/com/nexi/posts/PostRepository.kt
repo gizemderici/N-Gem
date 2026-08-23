@@ -52,14 +52,23 @@ interface PostRepository {
     /** Metin araması; alaka sırasına göre. */
     fun search(viewerId: UUID, query: String, cursor: RankedPostCursor?, limit: Int): List<RankedPost>
 
-    /** Keşfet: sorgu yok, popülerlik ve güncellik karışımı. */
-    fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost>
+    /**
+     * Keşfet: sorgu yok, popülerlik ve güncellik karışımı.
+     *
+     * `rankedAt` ilk sayfada sabitlenip sonraki sayfalarda imleçten geri
+     * taşınır. Aksi halde her SQL isteğindeki `now()` puanları biraz düşürür
+     * ve önceki sayfanın son öğesi yeniden sonuçlara girebilir.
+     */
+    fun explore(viewerId: UUID, rankedAt: Instant, cursor: RankedPostCursor?, limit: Int): List<RankedPost>
 }
 
 /** Sıralama puanıyla birlikte bir gönderi. */
 data class RankedPost(val details: PostDetails, val rank: Double)
 
 data class RankedPostCursor(val rank: Double, val createdAt: Instant, val id: UUID)
+
+/** Keşfet güncellik puanının bir haftalık yarılanma süresi. */
+internal const val EXPLORE_HALF_LIFE_SECONDS = 604_800.0
 
 class MediaOwnershipException : RuntimeException()
 class MediaAlreadyAttachedException : RuntimeException()
@@ -74,8 +83,6 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
          */
         const val VIEWER_BINDINGS = 3 + BlockFilter.BINDINGS
 
-        /** Keşfet puanının yarılanma süresi: bir haftalık içerik puanının yarısını yitirir. */
-        const val HALF_LIFE_SECONDS = 604_800.0
     }
 
     override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, topicIds: List<UUID>, now: Instant): Post {
@@ -451,7 +458,7 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
             }
         }
 
-    override fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost> =
+    override fun explore(viewerId: UUID, rankedAt: Instant, cursor: RankedPostCursor?, limit: Int): List<RankedPost> =
         dataSource.connection.use { connection ->
             // Etkileşim logaritmik ağırlıklı: bir gönderinin 1000 yerine 2000
             // beğeni alması sırayı iki katına çıkarmasın. Güncellik üstel
@@ -460,14 +467,17 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                 rankExpression = """
                     ln(1 + (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)
                           + (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id AND c.status = 'PUBLISHED'))
-                    * exp(-EXTRACT(EPOCH FROM (now() - p.created_at)) / $HALF_LIFE_SECONDS)
+                    * exp(-EXTRACT(EPOCH FROM (? - p.created_at)) / $EXPLORE_HALF_LIFE_SECONDS)
                 """.trimIndent(),
-                filter = "p.status = 'PUBLISHED' AND ${BlockFilter.notBlocked("p.owner_id")}",
+                filter = "p.status = 'PUBLISHED' AND p.created_at <= ? " +
+                    "AND ${BlockFilter.notBlocked("p.owner_id")}",
                 cursor = cursor,
             )
             connection.prepareStatement(sql).use { statement ->
                 var index = 1
                 repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
+                statement.setTimestamp(index++, Timestamp.from(rankedAt)) // puan referansı
+                statement.setTimestamp(index++, Timestamp.from(rankedAt)) // aday kümesi
                 repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
                 if (cursor != null) {
                     statement.setDouble(index++, cursor.rank)

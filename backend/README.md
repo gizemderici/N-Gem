@@ -54,7 +54,7 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 139 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 142 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
 takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, bildirimler, arama/keşfet, engelleme/şikâyet ve öneri olayları.
@@ -539,16 +539,24 @@ puan = ln(1 + beğeni + yorum) × exp(-yaş / 1 hafta)
 
 Etkileşim logaritmik: 1000 yerine 2000 beğeni almak sırayı iki katına çıkarmıyor.
 
-İmleç `(puan, createdAt, id)` üçlüsünü taşır. **Puan tam yazılmalı** — sabit
+Arama imleci `(puan, createdAt, id)` üçlüsünü taşır. **Puan ve zaman damgası
+kayıpsız yazılmalı** — sabit
 ondalıkla yuvarlamak sessiz bir tekrar hatasına yol açıyordu: yuvarlama yukarı
 gittiğinde imleçteki puan gerçek puandan büyük kalıyor ve aynı gönderi bir
-sonraki sayfada ikinci kez çıkıyordu. `Double.toString` tam dönüşlü gösterim verir.
+sonraki sayfada ikinci kez çıkıyordu. `Double.toString` tam dönüşlü gösterim verir;
+`Instant.toString` da PostgreSQL'in milisaniye altı hassasiyetini korur.
+
+Keşfet imleci bunlara ek olarak ilk sayfanın `rankedAt` anını taşır. Güncellik
+puanı sonraki sayfalarda aynı ana göre hesaplanır ve ilk sayfadan sonra oluşturulan
+gönderiler mevcut sayfalama oturumuna girmez. Böylece her istekte değişen `now()`
+aynı gönderiyi ikinci sayfaya tekrar düşürmez.
 
 ### Sınırlar
 
 - Boş sorgu `EMPTY_QUERY`, 100 karakterden uzun sorgu `QUERY_TOO_LONG` ile reddedilir.
-- Arama uçları kullanıcı başına dakikada 30 istekle sınırlı; tam metin sorguları
-  diğer uçlardan pahalı.
+- Arama ve Keşfet uçları kullanıcı başına ayrı ayrı dakikada 30 istekle sınırlı;
+  tam metin ve etkileşim sıralama sorguları diğer uçlardan pahalı.
+- Kullanıcı adı önek aramasında `%` ve `_` SQL jokeri değil, düz karakterdir.
 - Silinmiş gönderiler ve engellenen kullanıcıların içeriği sonuçlarda görünmez.
 
 ## Bildirimler
