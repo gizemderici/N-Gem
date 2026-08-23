@@ -123,8 +123,11 @@ class JdbcCommentRepository(private val dataSource: DataSource) : CommentReposit
     private fun detailsSelect() =
         """SELECT c.id, c.post_id, c.author_id, c.body, c.status, c.created_at, c.updated_at,
                   u.full_name, u.username,
-                  EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = c.author_id) AS author_followed
-           FROM comments c JOIN users u ON u.id = c.author_id"""
+                  EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = c.author_id) AS author_followed,
+                  am.storage_key AS author_avatar_key
+           FROM comments c
+           JOIN users u ON u.id = c.author_id
+           LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'"""
 
     private fun ResultSet.toComment() = Comment(
         id = getObject("id", UUID::class.java),
@@ -145,6 +148,7 @@ class JdbcCommentRepository(private val dataSource: DataSource) : CommentReposit
                 fullName = getString("full_name"),
                 username = getString("username"),
                 followedByMe = getBoolean("author_followed"),
+                avatarStorageKey = getString("author_avatar_key"),
             ),
         )
     }

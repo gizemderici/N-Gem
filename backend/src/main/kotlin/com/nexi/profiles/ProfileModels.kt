@@ -1,5 +1,7 @@
 package com.nexi.profiles
 
+import com.nexi.media.AvatarUrls
+import com.nexi.media.ObjectStorage
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.util.UUID
@@ -9,6 +11,9 @@ data class UserProfile(
     val id: UUID,
     val fullName: String,
     val username: String,
+    val bio: String?,
+    /** Depolama anahtarı sunucuda kalır; imzalı adres servis katmanında üretilir. */
+    val avatarStorageKey: String?,
     val createdAt: Instant,
     val postCount: Long,
     val followerCount: Long,
@@ -25,6 +30,9 @@ data class UserProfileResponse(
     val id: String,
     val fullName: String,
     val username: String,
+    val bio: String? = null,
+    val avatarUrl: String? = null,
+    val avatarUrlExpiresInSeconds: Long? = null,
     val createdAt: String,
     val postCount: Long,
     val followerCount: Long,
@@ -39,6 +47,8 @@ data class UserSummaryResponse(
     val id: String,
     val fullName: String,
     val username: String,
+    val avatarUrl: String? = null,
+    val avatarUrlExpiresInSeconds: Long? = null,
     val followedByMe: Boolean,
     val isMe: Boolean,
 )
@@ -57,14 +67,33 @@ data class FollowResponse(
     val followerCount: Long,
 )
 
-internal fun UserProfile.toResponse() = UserProfileResponse(
-    id = id.toString(),
-    fullName = fullName,
-    username = username,
-    createdAt = createdAt.toString(),
-    postCount = postCount,
-    followerCount = followerCount,
-    followingCount = followingCount,
-    followedByMe = followedByViewer,
-    isMe = isViewer,
+/**
+ * Profil düzenleme. Alanlar isteğe bağlı: gönderilmeyen alan değişmez.
+ * `bio` için boş metin göndermek biyografiyi siler.
+ */
+@Serializable
+data class UpdateProfileRequest(
+    val fullName: String? = null,
+    val bio: String? = null,
 )
+
+@Serializable
+data class SetAvatarRequest(val mediaId: String)
+
+internal fun UserProfile.toResponse(storage: ObjectStorage): UserProfileResponse {
+    val avatar = AvatarUrls.of(storage, avatarStorageKey)
+    return UserProfileResponse(
+        id = id.toString(),
+        fullName = fullName,
+        username = username,
+        bio = bio,
+        avatarUrl = avatar?.url,
+        avatarUrlExpiresInSeconds = avatar?.expiresInSeconds,
+        createdAt = createdAt.toString(),
+        postCount = postCount,
+        followerCount = followerCount,
+        followingCount = followingCount,
+        followedByMe = followedByViewer,
+        isMe = isViewer,
+    )
+}

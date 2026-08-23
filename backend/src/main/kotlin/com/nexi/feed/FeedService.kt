@@ -85,7 +85,7 @@ class FeedService(
         return MixedFeedResponse(
             items = items.map { (tier, details) ->
                 FeedItemResponse(
-                    post = details.toResponse(storage::createDownloadUrl, mediaUrlExpiry),
+                    post = details.toResponse(storage, mediaUrlExpiry),
                     source = tier.feedSource(),
                     reason = reasons.build(tier, details),
                 )
@@ -122,7 +122,7 @@ class FeedService(
         return MixedFeedResponse(
             items = page.map { details2 ->
                 FeedItemResponse(
-                    post = details2.toResponse(storage::createDownloadUrl, mediaUrlExpiry),
+                    post = details2.toResponse(storage, mediaUrlExpiry),
                     source = SOURCE_DISCOVERY,
                     reason = FeedReasonResponse(
                         code = "NO_TOPICS_SELECTED",

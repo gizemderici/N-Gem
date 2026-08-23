@@ -2,6 +2,7 @@ package com.nexi.comments
 
 import com.nexi.auth.ApiException
 import com.nexi.auth.validation
+import com.nexi.media.ObjectStorage
 import io.ktor.http.HttpStatusCode
 import java.nio.charset.StandardCharsets
 import java.time.Clock
@@ -11,6 +12,7 @@ import java.util.UUID
 
 class CommentService(
     private val repository: CommentRepository,
+    private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     fun create(authorId: UUID, postId: UUID, request: CreateCommentRequest): CommentResponse {
@@ -33,7 +35,7 @@ class CommentService(
             )
         ) ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
 
-        return details.toResponse(deletableByMe = true)
+        return details.toResponse(storage, deletableByMe = true)
     }
 
     fun page(viewerId: UUID, postId: UUID, rawCursor: String?, requestedLimit: Int?): CommentPageResponse {
@@ -47,7 +49,7 @@ class CommentService(
         val nextCursor = if (hasMore) items.lastOrNull()?.comment?.let { encodeCursor(it) } else null
 
         return CommentPageResponse(
-            items = items.map { it.toResponse(deletableByMe = canDelete(viewerId, it.comment.authorId, postOwnerId)) },
+            items = items.map { it.toResponse(storage, deletableByMe = canDelete(viewerId, it.comment.authorId, postOwnerId)) },
             nextCursor = nextCursor,
             totalCount = repository.countForPost(postId),
         )

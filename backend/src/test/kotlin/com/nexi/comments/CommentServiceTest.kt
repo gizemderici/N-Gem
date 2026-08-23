@@ -1,6 +1,7 @@
 package com.nexi.comments
 
 import com.nexi.auth.ApiException
+import com.nexi.posts.FakeObjectStorage
 import io.ktor.http.HttpStatusCode
 import java.time.Clock
 import java.time.Instant
@@ -17,7 +18,7 @@ import kotlin.test.assertTrue
 class CommentServiceTest {
     private val now = Instant.parse("2026-08-23T00:00:00Z")
     private val repository = InMemoryCommentRepository(now)
-    private val service = CommentService(repository, Clock.fixed(now, ZoneOffset.UTC))
+    private val service = CommentService(repository, FakeObjectStorage(), Clock.fixed(now, ZoneOffset.UTC))
 
     private val postOwnerId = UUID.randomUUID()
     private val commenterId = UUID.randomUUID()

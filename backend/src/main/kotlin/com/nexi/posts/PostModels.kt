@@ -1,10 +1,13 @@
 package com.nexi.posts
 
+import com.nexi.media.AvatarUrls
 import com.nexi.media.MediaAsset
+import com.nexi.media.ObjectStorage
 import com.nexi.topics.Topic
 import com.nexi.topics.TopicSummaryResponse
 import com.nexi.topics.toSummary
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -64,7 +67,20 @@ data class PostAuthorResponse(
     val username: String,
     /** Görüntüleyen bu yazarı takip ediyor mu; kartlardaki takip düğmesi bunu okur. */
     val followedByMe: Boolean = false,
+    val avatarUrl: String? = null,
+    val avatarUrlExpiresInSeconds: Long? = null,
+    /**
+     * Depolama anahtarı yalnızca sunucu içinde dolaşır; imzalı adres servis
+     * katmanında üretilir, bu yüzden cevaba serileştirilmez.
+     */
+    @Transient val avatarStorageKey: String? = null,
 )
+
+/** Yazar cevabına süreli avatar adresini yerleştirir. */
+internal fun PostAuthorResponse.withAvatar(storage: ObjectStorage): PostAuthorResponse {
+    val avatar = AvatarUrls.of(storage, avatarStorageKey) ?: return this
+    return copy(avatarUrl = avatar.url, avatarUrlExpiresInSeconds = avatar.expiresInSeconds)
+}
 
 data class FeedCursor(val createdAt: Instant, val id: UUID)
 
@@ -118,17 +134,17 @@ data class PostInteractionResponse(
 
 /** Gönderi cevabı hem klasik akışta hem kişiselleştirilmiş akışta aynı biçimde üretilir. */
 internal fun PostDetails.toResponse(
-    downloadUrl: (storageKey: String, expiresIn: Duration) -> String,
+    storage: ObjectStorage,
     mediaUrlExpiry: Duration,
 ) = PostResponse(
     id = post.id.toString(),
     text = post.body,
-    author = author,
+    author = author.withAvatar(storage),
     media = media.map { asset ->
         PostMediaResponse(
             id = asset.id.toString(),
             mimeType = asset.mimeType,
-            url = downloadUrl(asset.storageKey, mediaUrlExpiry),
+            url = storage.createDownloadUrl(asset.storageKey, mediaUrlExpiry),
             urlExpiresInSeconds = mediaUrlExpiry.seconds,
         )
     },

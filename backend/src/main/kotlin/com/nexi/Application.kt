@@ -94,8 +94,8 @@ fun Application.module() {
         postRepository = postRepository,
         ranker = ranker,
     )
-    val commentService = CommentService(JdbcCommentRepository(dataSource))
-    val profileService = ProfileService(JdbcProfileRepository(dataSource))
+    val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage)
+    val profileService = ProfileService(JdbcProfileRepository(dataSource), objectStorage)
     val topicService = TopicService(topicRepository)
     val feedService = FeedService(postRepository, topicRepository, objectStorage)
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)

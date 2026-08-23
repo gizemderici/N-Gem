@@ -385,8 +385,11 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                   (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id AND c.status = 'PUBLISHED') AS comment_count,
                   EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = ?) AS liked_by_viewer,
                   EXISTS(SELECT 1 FROM post_saves ps WHERE ps.post_id = p.id AND ps.user_id = ?) AS saved_by_viewer,
-                  EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id) AS author_followed
-           FROM posts p JOIN users u ON u.id = p.owner_id"""
+                  EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id) AS author_followed,
+                  am.storage_key AS author_avatar_key
+           FROM posts p
+           JOIN users u ON u.id = p.owner_id
+           LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'"""
 
     private fun ResultSet.toDetails(): PostDetails {
         val post = Post(
@@ -404,6 +407,7 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                 fullName = getString("full_name"),
                 username = getString("username"),
                 followedByMe = getBoolean("author_followed"),
+                avatarStorageKey = getString("author_avatar_key"),
             ),
             media = emptyList(),
             topics = emptyList(),

@@ -1,6 +1,7 @@
 package com.nexi.profiles
 
 import com.nexi.auth.ApiException
+import com.nexi.posts.FakeObjectStorage
 import io.ktor.http.HttpStatusCode
 import java.time.Clock
 import java.time.Instant
@@ -16,7 +17,7 @@ import kotlin.test.assertTrue
 class ProfileServiceTest {
     private val now = Instant.parse("2026-08-23T00:00:00Z")
     private val repository = InMemoryProfileRepository(now)
-    private val service = ProfileService(repository, Clock.fixed(now, ZoneOffset.UTC))
+    private val service = ProfileService(repository, FakeObjectStorage(), Clock.fixed(now, ZoneOffset.UTC))
 
     private val viewerId = repository.addUser("Gizem Derici", "gizem")
     private val mertId = repository.addUser("Mert Arslan", "mert")

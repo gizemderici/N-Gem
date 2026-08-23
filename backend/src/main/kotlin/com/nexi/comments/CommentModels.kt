@@ -1,6 +1,8 @@
 package com.nexi.comments
 
+import com.nexi.media.ObjectStorage
 import com.nexi.posts.PostAuthorResponse
+import com.nexi.posts.withAvatar
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.util.UUID
@@ -46,11 +48,11 @@ data class CommentPageResponse(
     val totalCount: Long,
 )
 
-internal fun CommentDetails.toResponse(deletableByMe: Boolean) = CommentResponse(
+internal fun CommentDetails.toResponse(storage: ObjectStorage, deletableByMe: Boolean) = CommentResponse(
     id = comment.id.toString(),
     postId = comment.postId.toString(),
     text = comment.body,
-    author = author,
+    author = author.withAvatar(storage),
     createdAt = comment.createdAt.toString(),
     deletableByMe = deletableByMe,
 )

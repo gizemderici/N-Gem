@@ -11,13 +11,24 @@ data class FollowEdge(
     val userId: UUID,
     val fullName: String,
     val username: String,
+    val avatarStorageKey: String?,
     val followedByViewer: Boolean,
     val createdAt: Instant,
 )
 
+/** Avatar olarak seçilen medyanın sahiplik ve durum kontrolü sonucu. */
+enum class AvatarMediaCheck { OK, NOT_FOUND, NOT_OWNED, NOT_READY, NOT_AN_IMAGE }
+
 interface ProfileRepository {
     fun findByUsername(username: String, viewerId: UUID): UserProfile?
     fun findIdByUsername(username: String): UUID?
+    fun findUsernameById(userId: UUID): String?
+
+    /** Gönderilmeyen alanlar değişmez. */
+    fun updateProfile(userId: UUID, fullName: String?, bio: String?, clearBio: Boolean, now: Instant)
+
+    fun checkAvatarMedia(mediaId: UUID, ownerId: UUID): AvatarMediaCheck
+    fun setAvatar(userId: UUID, mediaId: UUID?, now: Instant)
 
     /** @return Takip edilen kullanıcının güncel takipçi sayısı. */
     fun setFollow(followerId: UUID, followeeId: UUID, active: Boolean, now: Instant): Long
@@ -33,12 +44,15 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
     override fun findByUsername(username: String, viewerId: UUID): UserProfile? =
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                """SELECT u.id, u.full_name, u.username, u.created_at,
+                """SELECT u.id, u.full_name, u.username, u.bio, u.created_at,
+                          am.storage_key AS avatar_key,
                           (SELECT COUNT(*) FROM posts p WHERE p.owner_id = u.id AND p.status = 'PUBLISHED') AS post_count,
                           (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id) AS follower_count,
                           (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id) AS following_count,
                           EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = u.id) AS followed_by_viewer
-                   FROM users u WHERE u.username_normalized = ?"""
+                   FROM users u
+                   LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'
+                   WHERE u.username_normalized = ?"""
             ).use { statement ->
                 statement.setObject(1, viewerId)
                 statement.setString(2, username.lowercase())
@@ -49,6 +63,8 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
                         id = id,
                         fullName = results.getString("full_name"),
                         username = results.getString("username"),
+                        bio = results.getString("bio"),
+                        avatarStorageKey = results.getString("avatar_key"),
                         createdAt = results.getTimestamp("created_at").toInstant(),
                         postCount = results.getLong("post_count"),
                         followerCount = results.getLong("follower_count"),
@@ -65,6 +81,67 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
             statement.setString(1, username.lowercase())
             statement.executeQuery().use { results ->
                 if (results.next()) results.getObject("id", UUID::class.java) else null
+            }
+        }
+    }
+
+    override fun findUsernameById(userId: UUID): String? = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT username FROM users WHERE id = ?").use { statement ->
+            statement.setObject(1, userId)
+            statement.executeQuery().use { results -> if (results.next()) results.getString("username") else null }
+        }
+    }
+
+    override fun updateProfile(userId: UUID, fullName: String?, bio: String?, clearBio: Boolean, now: Instant) {
+        // COALESCE ile: parametre null geldiyse sütun olduğu gibi kalır.
+        // Biyografiyi silmek ayrı bir bayrakla isteniyor, yoksa "null gönder"
+        // ile "değiştirme" ayırt edilemezdi.
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """UPDATE users
+                   SET full_name = COALESCE(?, full_name),
+                       bio = CASE WHEN ? THEN NULL ELSE COALESCE(?, bio) END,
+                       updated_at = ?
+                   WHERE id = ?"""
+            ).use { statement ->
+                statement.setString(1, fullName)
+                statement.setBoolean(2, clearBio)
+                statement.setString(3, bio)
+                statement.setTimestamp(4, Timestamp.from(now))
+                statement.setObject(5, userId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun checkAvatarMedia(mediaId: UUID, ownerId: UUID): AvatarMediaCheck =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT owner_id, status, mime_type FROM media_assets WHERE id = ?"
+            ).use { statement ->
+                statement.setObject(1, mediaId)
+                statement.executeQuery().use { results ->
+                    if (!results.next()) return@use AvatarMediaCheck.NOT_FOUND
+                    when {
+                        results.getObject("owner_id", UUID::class.java) != ownerId -> AvatarMediaCheck.NOT_OWNED
+                        results.getString("status") != "READY" -> AvatarMediaCheck.NOT_READY
+                        // Avatar bir video olamaz; medya yükleme mp4 kabul ediyor.
+                        !results.getString("mime_type").startsWith("image/") -> AvatarMediaCheck.NOT_AN_IMAGE
+                        else -> AvatarMediaCheck.OK
+                    }
+                }
+            }
+        }
+
+    override fun setAvatar(userId: UUID, mediaId: UUID?, now: Instant) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE users SET avatar_media_id = ?, updated_at = ? WHERE id = ?"
+            ).use { statement ->
+                statement.setObject(1, mediaId)
+                statement.setTimestamp(2, Timestamp.from(now))
+                statement.setObject(3, userId)
+                statement.executeUpdate()
             }
         }
     }
@@ -135,8 +212,11 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
         val cursorClause = if (cursor == null) "" else "AND (f.created_at, u.id) < (?, ?)"
         connection.prepareStatement(
             """SELECT u.id, u.full_name, u.username, f.created_at,
+                      am.storage_key AS avatar_key,
                       EXISTS(SELECT 1 FROM follows v WHERE v.follower_id = ? AND v.followee_id = u.id) AS followed_by_viewer
-               FROM follows f JOIN users u ON u.id = $joinColumn
+               FROM follows f
+               JOIN users u ON u.id = $joinColumn
+               LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'
                WHERE $filterColumn = ? $cursorClause
                ORDER BY f.created_at DESC, u.id DESC LIMIT ?"""
         ).use { statement ->
@@ -164,6 +244,7 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
         userId = getObject("id", UUID::class.java),
         fullName = getString("full_name"),
         username = getString("username"),
+        avatarStorageKey = getString("avatar_key"),
         followedByViewer = getBoolean("followed_by_viewer"),
         createdAt = getTimestamp("created_at").toInstant(),
     )

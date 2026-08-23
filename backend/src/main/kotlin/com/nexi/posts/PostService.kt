@@ -192,7 +192,7 @@ class PostService(
     }
 
     private fun response(details: PostDetails, recommendationReason: String? = null): PostResponse =
-        details.toResponse(storage::createDownloadUrl, mediaUrlExpiry)
+        details.toResponse(storage, mediaUrlExpiry)
             .copy(recommendationReason = recommendationReason)
 
     companion object {

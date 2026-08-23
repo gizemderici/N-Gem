@@ -54,10 +54,10 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 56 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 66 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve video), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
-takip, takip içeriğinin akışa girmesi ve öneri olayları.
+takip, takip içeriğinin akışa girmesi, avatar/biyografi ve öneri olayları.
 
 ```bash
 docker compose up -d --build
@@ -363,6 +363,41 @@ Kendini takip etmek `CANNOT_FOLLOW_SELF` ile reddedilir; veritabanında da bir
 
 Gönderi ve yorum cevaplarındaki `author` nesnesi artık `followedByMe` taşır;
 kartlardaki takip düğmesi bunu okur.
+
+### Profil düzenleme, avatar ve biyografi
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `PATCH` | `/api/v1/users/me/profile` | `{ "fullName"?, "bio"? }` — gönderilmeyen alan değişmez |
+| `PUT` | `/api/v1/users/me/avatar` | `{ "mediaId": "<hazır görsel>" }` |
+| `DELETE` | `/api/v1/users/me/avatar` | Avatarı kaldırır |
+
+Üçü de güncel `UserProfileResponse` döner.
+
+**Biyografi.** En fazla 280 karakter (`BIO_TOO_LONG`). Alanı hiç göndermemek
+"değiştirme" demektir; boş metin göndermek biyografiyi **siler**. Bu ayrım
+olmasaydı `null` göndermenin ne anlama geldiği belirsiz kalırdı.
+
+**Avatar.** Normal medya akışıyla yüklenmiş bir görsel gösterilir. Doğrulamalar:
+
+| Durum | Kod |
+|---|---|
+| Medya yok ya da başkasına ait | `MEDIA_NOT_AVAILABLE` |
+| Yükleme tamamlanmamış | `MEDIA_NOT_READY` |
+| Görsel değil (örneğin MP4) | `AVATAR_MUST_BE_IMAGE` |
+
+Başkasının medyası için "yok" ile aynı kod dönüyor; aksi halde o görselin
+varlığı açığa çıkardı.
+
+**Avatar adresleri süreli imzalı bağlantılardır** (15 dakika), tıpkı gönderi
+görselleri gibi. Cevaplarda `avatarUrl` ve `avatarUrlExpiresInSeconds` birlikte
+gelir; avatarı olmayan kullanıcıda ikisi de bulunmaz.
+
+Avatar bilgisi şu cevaplarda taşınır: profil, gönderi yazarı, yorum yazarı,
+takipçi ve takip listeleri. Bildirim ve mesaj cevapları henüz yok (Faz 11–12).
+
+Depolama anahtarı hiçbir zaman dışarı çıkmaz; imzalı adres servis katmanında
+üretilir (`AvatarUrls`).
 
 ### Akıştaki takip katmanı
 

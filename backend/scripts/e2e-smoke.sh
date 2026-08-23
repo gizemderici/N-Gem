@@ -199,6 +199,55 @@ printf '%s' "$UPOSTS" | grep -q "$PID_B" && ok "profil altinda gonderileri" || b
 NOUSER=$(ca "$TOK_A" "$BASE/api/v1/users/yokboyle123")
 [ "$(printf '%s' "$NOUSER" | field code)" = "USER_NOT_FOUND" ] && ok "olmayan kullanici 404" || bad "USER_NOT_FOUND" "$NOUSER"
 
+# ---------------------------------------------------------- 8b) Avatar ve bio
+step "8b) Avatar ve biyografi"
+BIO=$(ca "$TOK_A" -X PATCH "$BASE/api/v1/users/me/profile" -H 'Content-Type: application/json' \
+  -d '{"bio":"E2E biyografi metni"}')
+[ "$(printf '%s' "$BIO" | field bio)" = "E2E biyografi metni" ] && ok "biyografi yazildi" || bad "bio yazma" "$BIO"
+
+NAMEONLY=$(ca "$TOK_A" -X PATCH "$BASE/api/v1/users/me/profile" -H 'Content-Type: application/json' -d '{"fullName":"E2E Yeni Ad"}')
+[ "$(printf '%s' "$NAMEONLY" | field bio)" = "E2E biyografi metni" ] && ok "ad degisti, bio korundu" || bad "kismi guncelleme" "$NAMEONLY"
+
+LONGBIO=$(ca "$TOK_A" -X PATCH "$BASE/api/v1/users/me/profile" -H 'Content-Type: application/json' \
+  -d "{\"bio\":\"$(head -c 300 /dev/zero | tr '\0' 'a')\"}")
+[ "$(printf '%s' "$LONGBIO" | field code)" = "BIO_TOO_LONG" ] && ok "uzun bio reddedildi" || bad "BIO_TOO_LONG" "$LONGBIO"
+
+# Avatar icin ayri bir gorsel yukle
+AV=/tmp/e2e_avatar.png
+printf '\211PNG\r\n\032\n' > "$AV"; head -c 150 /dev/urandom >> "$AV"
+AVSIZE=$(wc -c < "$AV" | tr -d ' ')
+AUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
+  -d "{\"filename\":\"avatar.png\",\"mimeType\":\"image/png\",\"sizeBytes\":$AVSIZE}")
+AVID=$(printf '%s' "$AUP" | field mediaId); AVURL=$(printf '%s' "$AUP" | field uploadUrl)
+curl -s -o /dev/null -m 30 -X PUT "$AVURL" -H "Content-Type: image/png" --data-binary "@$AV"
+ca "$TOK_A" -X POST "$BASE/api/v1/media/$AVID/complete" >/dev/null
+
+SETAV=$(ca "$TOK_A" -X PUT "$BASE/api/v1/users/me/avatar" -H 'Content-Type: application/json' -d "{\"mediaId\":\"$AVID\"}")
+printf '%s' "$SETAV" | grep -q '"avatarUrl":"http' && ok "avatar atandi, sureli adres dondu" || bad "avatar atama" "$SETAV"
+
+SEEN=$(ca "$TOK_B" "$BASE/api/v1/users/$USER_A")
+printf '%s' "$SEEN" | grep -q '"avatarUrl":"http' && ok "avatar baskasinin gozunden de gorunuyor" || bad "avatar gorunurlugu" "$SEEN"
+
+# Video avatar olamaz (VID onceki adimda yuklendi)
+VIDAV=$(ca "$TOK_A" -X PUT "$BASE/api/v1/users/me/avatar" -H 'Content-Type: application/json' -d "{\"mediaId\":\"$VID\"}")
+[ "$(printf '%s' "$VIDAV" | field code)" = "AVATAR_MUST_BE_IMAGE" ] && ok "video avatar reddedildi" || bad "AVATAR_MUST_BE_IMAGE" "$VIDAV"
+
+FOREIGN=$(ca "$TOK_B" -X PUT "$BASE/api/v1/users/me/avatar" -H 'Content-Type: application/json' -d "{\"mediaId\":\"$AVID\"}")
+[ "$(printf '%s' "$FOREIGN" | field code)" = "MEDIA_NOT_AVAILABLE" ] && ok "baskasinin gorseli avatar olamaz" || bad "MEDIA_NOT_AVAILABLE" "$FOREIGN"
+
+# Avatar gonderi ve yorum cevaplarinda da olmali
+FEEDAV=$(ca "$TOK_B" "$BASE/api/v1/feed?limit=20")
+printf '%s' "$FEEDAV" | grep -q '"avatarUrl":"http' && ok "akis yazarinda avatar var" || bad "akista avatar" "$(printf '%s' "$FEEDAV" | head -c 200)"
+
+# Avatarli kullanici (A) taze bir yorum yazsin; onceki yorumu 7. adimda silindi.
+ca "$TOK_A" -X POST "$BASE/api/v1/posts/$PID_B/comments" -H 'Content-Type: application/json' \
+  -d '{"text":"Avatarli yorum"}' >/dev/null
+CMTAV=$(ca "$TOK_B" "$BASE/api/v1/posts/$PID_B/comments")
+printf '%s' "$CMTAV" | grep -q '"avatarUrl":"http' && ok "yorum yazarinda avatar var" || bad "yorumda avatar" "$(printf '%s' "$CMTAV" | head -c 200)"
+
+DELAV=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/users/me/avatar")
+printf '%s' "$DELAV" | grep -q '"avatarUrl"' && bad "avatar silme" "$DELAV" || ok "avatar kaldirildi"
+
 # ---------------------------------------------------------------- 9) Takip
 step "9) Takip etme ve birakma"
 F1=$(ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/follow")

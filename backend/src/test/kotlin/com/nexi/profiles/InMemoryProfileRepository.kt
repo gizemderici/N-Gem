@@ -4,7 +4,25 @@ import java.time.Instant
 import java.util.UUID
 
 internal class InMemoryProfileRepository(private val baseTime: Instant) : ProfileRepository {
-    private data class Row(val id: UUID, val fullName: String, val username: String, val createdAt: Instant)
+    private data class Row(
+        val id: UUID,
+        val fullName: String,
+        val username: String,
+        val createdAt: Instant,
+        val bio: String? = null,
+        val avatarMediaId: UUID? = null,
+    )
+
+    /** mediaId -> (sahibi, durum, mimeType, depolama anahtari) */
+    val media = mutableMapOf<UUID, MediaRow>()
+
+    data class MediaRow(val ownerId: UUID, val status: String, val mimeType: String, val storageKey: String)
+
+    fun addMedia(ownerId: UUID, status: String = "READY", mimeType: String = "image/png"): UUID {
+        val id = UUID.randomUUID()
+        media[id] = MediaRow(ownerId, status, mimeType, "users/$ownerId/media/$id.png")
+        return id
+    }
 
     private val users = mutableMapOf<UUID, Row>()
     private val follows = linkedMapOf<Pair<UUID, UUID>, Instant>()
@@ -24,6 +42,12 @@ internal class InMemoryProfileRepository(private val baseTime: Instant) : Profil
             id = row.id,
             fullName = row.fullName,
             username = row.username,
+            bio = row.bio,
+            // Gercek sorgu gibi: yalnizca READY medya avatar olarak gorunur.
+            avatarStorageKey = row.avatarMediaId
+                ?.let { media[it] }
+                ?.takeIf { it.status == "READY" }
+                ?.storageKey,
             createdAt = row.createdAt,
             postCount = postCounts[row.id] ?: 0,
             followerCount = followerCount(row.id),
@@ -35,6 +59,31 @@ internal class InMemoryProfileRepository(private val baseTime: Instant) : Profil
 
     override fun findIdByUsername(username: String): UUID? =
         users.values.firstOrNull { it.username.equals(username, ignoreCase = true) }?.id
+
+    override fun findUsernameById(userId: UUID): String? = users[userId]?.username
+
+    override fun updateProfile(userId: UUID, fullName: String?, bio: String?, clearBio: Boolean, now: Instant) {
+        val row = users[userId] ?: return
+        users[userId] = row.copy(
+            fullName = fullName ?: row.fullName,
+            bio = if (clearBio) null else bio ?: row.bio,
+        )
+    }
+
+    override fun checkAvatarMedia(mediaId: UUID, ownerId: UUID): AvatarMediaCheck {
+        val asset = media[mediaId] ?: return AvatarMediaCheck.NOT_FOUND
+        return when {
+            asset.ownerId != ownerId -> AvatarMediaCheck.NOT_OWNED
+            asset.status != "READY" -> AvatarMediaCheck.NOT_READY
+            !asset.mimeType.startsWith("image/") -> AvatarMediaCheck.NOT_AN_IMAGE
+            else -> AvatarMediaCheck.OK
+        }
+    }
+
+    override fun setAvatar(userId: UUID, mediaId: UUID?, now: Instant) {
+        val row = users[userId] ?: return
+        users[userId] = row.copy(avatarMediaId = mediaId)
+    }
 
     override fun setFollow(followerId: UUID, followeeId: UUID, active: Boolean, now: Instant): Long {
         val key = followerId to followeeId
@@ -69,6 +118,10 @@ internal class InMemoryProfileRepository(private val baseTime: Instant) : Profil
                     userId = row.id,
                     fullName = row.fullName,
                     username = row.username,
+                    avatarStorageKey = row.avatarMediaId
+                        ?.let { media[it] }
+                        ?.takeIf { it.status == "READY" }
+                        ?.storageKey,
                     followedByViewer = viewerId to row.id in follows,
                     createdAt = createdAt,
                 )
