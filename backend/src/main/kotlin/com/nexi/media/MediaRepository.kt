@@ -11,6 +11,9 @@ interface MediaRepository {
     fun findById(id: UUID): MediaAsset?
     fun markReady(id: UUID, actualSizeBytes: Long, updatedAt: Instant): Boolean
     fun markStatus(id: UUID, status: MediaStatus, updatedAt: Instant): Boolean
+
+    /** Belirtilen durumda takılıp kalmış, [updatedBefore] tarihinden eski kayıtlar. */
+    fun findStale(status: MediaStatus, updatedBefore: Instant, limit: Int): List<MediaAsset>
 }
 
 class JdbcMediaRepository(private val dataSource: DataSource) : MediaRepository {
@@ -66,6 +69,20 @@ class JdbcMediaRepository(private val dataSource: DataSource) : MediaRepository 
                 statement.setTimestamp(2, Timestamp.from(updatedAt))
                 statement.setObject(3, id)
                 statement.executeUpdate() == 1
+            }
+        }
+
+    override fun findStale(status: MediaStatus, updatedBefore: Instant, limit: Int): List<MediaAsset> =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT * FROM media_assets WHERE status = ? AND updated_at < ? ORDER BY updated_at LIMIT ?"
+            ).use { statement ->
+                statement.setString(1, status.name)
+                statement.setTimestamp(2, Timestamp.from(updatedBefore))
+                statement.setInt(3, limit)
+                statement.executeQuery().use { results ->
+                    buildList { while (results.next()) add(results.toMediaAsset()) }
+                }
             }
         }
 

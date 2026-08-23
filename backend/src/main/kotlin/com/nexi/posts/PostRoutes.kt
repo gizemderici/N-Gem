@@ -63,6 +63,19 @@ fun Route.postRoutes(service: PostService) {
                 call.respond(service.setSave(call.authenticatedUserId(), call.postId(), false))
             }
         }
+
+        // Profil ekranının listesi. Başkasının profili Faz 5'te (takip) geliyor.
+        get("/api/v1/users/me/posts") {
+            val viewerId = call.authenticatedUserId()
+            call.respond(
+                service.postsByOwner(
+                    ownerId = viewerId,
+                    viewerId = viewerId,
+                    rawCursor = call.request.queryParameters["cursor"],
+                    requestedLimit = call.request.queryParameters["limit"]?.toIntOrNull(),
+                )
+            )
+        }
     }
 }
 

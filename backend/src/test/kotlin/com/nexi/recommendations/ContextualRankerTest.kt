@@ -84,8 +84,10 @@ class ContextualRankerTest {
             post = post,
             author = PostAuthorResponse(ownerId.toString(), "İçerik Üreticisi", "uretici"),
             media = emptyList(),
+            topics = emptyList(),
             likeCount = 0,
             saveCount = 0,
+            commentCount = 0,
             likedByViewer = false,
             savedByViewer = false,
         )

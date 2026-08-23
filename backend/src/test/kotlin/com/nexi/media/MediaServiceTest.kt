@@ -102,7 +102,7 @@ class MediaServiceTest {
     }
 }
 
-private class InMemoryMediaRepository : MediaRepository {
+internal class InMemoryMediaRepository : MediaRepository {
     val assets = ConcurrentHashMap<UUID, MediaAsset>()
     override fun create(asset: MediaAsset) { assets[asset.id] = asset }
     override fun findById(id: UUID) = assets[id]
@@ -124,9 +124,14 @@ private class InMemoryMediaRepository : MediaRepository {
         }
         return changed
     }
+    override fun findStale(status: MediaStatus, updatedBefore: Instant, limit: Int): List<MediaAsset> =
+        assets.values
+            .filter { it.status == status && it.updatedAt < updatedBefore }
+            .sortedBy { it.updatedAt }
+            .take(limit)
 }
 
-private class FakeObjectStorage : ObjectStorage {
+internal class FakeObjectStorage : ObjectStorage {
     val objects = ConcurrentHashMap<String, StoredObjectInfo>()
     val deletedKeys = mutableSetOf<String>()
     override fun createUploadUrl(key: String, mimeType: String, expiresIn: Duration) = "http://public-storage/$key?upload"

@@ -2,6 +2,7 @@ package com.nexi.recommendations
 
 import com.nexi.auth.ApiException
 import com.nexi.posts.FeedCursor
+import com.nexi.posts.FeedTier
 import com.nexi.posts.Post
 import com.nexi.posts.PostDetails
 import com.nexi.posts.PostRepository
@@ -110,10 +111,30 @@ private class InMemoryRecommendationRepository : RecommendationRepository {
 }
 
 private object EmptyPostRepository : PostRepository {
-    override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, now: Instant): Post = unsupported()
+    override fun create(
+        ownerId: UUID,
+        body: String,
+        mediaIds: List<UUID>,
+        topicIds: List<UUID>,
+        now: Instant,
+    ): Post = unsupported()
     override fun findDetails(postId: UUID, viewerId: UUID): PostDetails? = null
     override fun feed(viewerId: UUID, cursor: FeedCursor?, limit: Int): List<PostDetails> = unsupported()
-    override fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): Boolean = unsupported()
+    override fun postsByOwner(
+        ownerId: UUID,
+        viewerId: UUID,
+        cursor: FeedCursor?,
+        limit: Int,
+    ): List<PostDetails> = unsupported()
+    override fun feedTier(
+        viewerId: UUID,
+        tier: FeedTier,
+        priorityTopicCount: Int,
+        cursor: FeedCursor?,
+        limit: Int,
+    ): List<PostDetails> = unsupported()
+    override fun hydrate(details: List<PostDetails>): List<PostDetails> = unsupported()
+    override fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): List<String>? = unsupported()
     override fun setLike(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long = unsupported()
     override fun setSave(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long = unsupported()
 }

@@ -2,7 +2,6 @@ package com.nexi.auth
 
 import com.nexi.config.AppConfig
 import io.ktor.http.HttpStatusCode
-import org.slf4j.LoggerFactory
 import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
@@ -15,8 +14,8 @@ class AuthService(
     private val tokenService: TokenService,
     private val config: AppConfig,
     private val clock: Clock = Clock.systemUTC(),
+    private val mailer: VerificationMailer = LoggingVerificationMailer(config.exposeDevelopmentCodes),
 ) {
-    private val logger = LoggerFactory.getLogger(AuthService::class.java)
 
     fun register(request: RegisterRequest): RegistrationResponse {
         val fullName = request.fullName.trim().replace(Regex("\\s+"), " ")
@@ -202,11 +201,6 @@ class AuthService(
     private fun developmentCode(rawCode: String) = if (config.exposeDevelopmentCodes) rawCode else null
 
     private fun dispatchCode(email: String, code: String, purpose: VerificationPurpose) {
-        if (config.exposeDevelopmentCodes) {
-            logger.info("Development verification code: email={}, purpose={}, code={}", email, purpose, code)
-        } else {
-            // Üretime geçmeden önce bu nokta gerçek e-posta sağlayıcısına bağlanmalıdır.
-            logger.warn("Verification requested but email provider is not configured: purpose={}", purpose)
-        }
+        mailer.send(email, code, purpose)
     }
 }

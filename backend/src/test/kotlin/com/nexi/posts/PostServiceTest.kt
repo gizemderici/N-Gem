@@ -1,13 +1,9 @@
 package com.nexi.posts
 
 import com.nexi.auth.ApiException
-import com.nexi.media.MediaAsset
-import com.nexi.media.MediaStatus
-import com.nexi.media.ObjectStorage
-import com.nexi.media.StoredObjectInfo
+import com.nexi.topics.InMemoryTopicRepository
 import io.ktor.http.HttpStatusCode
 import java.time.Clock
-import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
@@ -15,13 +11,16 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PostServiceTest {
     private val now = Instant.parse("2026-08-23T00:00:00Z")
     private val ownerId = UUID.randomUUID()
-    private val repository = FakePostRepository(ownerId, now)
-    private val service = PostService(repository, FakePostStorage(), Clock.fixed(now, ZoneOffset.UTC))
+    private val topics = InMemoryTopicRepository()
+    private val repository = InMemoryPostRepository(ownerId, now, topics)
+    private val storage = FakeObjectStorage()
+    private val service = PostService(repository, storage, Clock.fixed(now, ZoneOffset.UTC))
 
     @Test
     fun `ready owned media can be attached to a post`() {
@@ -83,83 +82,72 @@ class PostServiceTest {
         service.delete(ownerId, UUID.fromString(post.id))
         assertFailsWith<ApiException> { service.get(ownerId, UUID.fromString(post.id)) }
     }
-}
 
-private class FakePostRepository(private val ownerId: UUID, private val baseTime: Instant) : PostRepository {
-    private val posts = linkedMapOf<UUID, Post>()
-    private val media = mutableMapOf<UUID, MediaAsset>()
-    private val attachedMedia = mutableSetOf<UUID>()
-    private val likes = mutableSetOf<Pair<UUID, UUID>>()
-    private val saves = mutableSetOf<Pair<UUID, UUID>>()
-    private var sequence = 0L
+    @Test
+    fun `deleting a post releases its media from database and storage`() {
+        val media = repository.addReadyMedia(ownerId)
+        val post = service.create(ownerId, CreatePostRequest("Görselli gönderi", listOf(media.id.toString())))
 
-    fun addReadyMedia(mediaOwnerId: UUID): MediaAsset {
-        val id = UUID.randomUUID()
-        return MediaAsset(
-            id, mediaOwnerId, "users/$mediaOwnerId/media/$id.png", "test.png", "image/png",
-            8, 8, MediaStatus.READY, baseTime, baseTime,
-        ).also { media[id] = it }
+        service.delete(ownerId, UUID.fromString(post.id))
+
+        // Dosya depoda kalmamalı; eskiden hem satır hem nesne sonsuza kadar duruyordu.
+        assertTrue(media.storageKey in storage.deletedKeys)
+        // Görsel de silinmiş sayılır, yeniden bağlanamaz.
+        assertEquals("MEDIA_NOT_AVAILABLE", assertFailsWith<ApiException> {
+            service.create(ownerId, CreatePostRequest("Tekrar kullanmayı dene", listOf(media.id.toString())))
+        }.code)
     }
 
-    override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, now: Instant): Post {
-        mediaIds.forEach { id ->
-            val asset = media[id]
-            if (asset == null || asset.ownerId != ownerId || asset.status != MediaStatus.READY) throw MediaOwnershipException()
-            if (id in attachedMedia) throw MediaAlreadyAttachedException()
-        }
-        val timestamp = now.minusSeconds(sequence++)
-        val post = Post(UUID.randomUUID(), ownerId, body, PostStatus.PUBLISHED, timestamp, timestamp)
-        posts[post.id] = post
-        attachedMedia += mediaIds
-        postMedia[post.id] = mediaIds
-        return post
+    @Test
+    fun `owner listing returns only that user's posts and skips deleted ones`() {
+        val strangerId = UUID.randomUUID()
+        service.create(ownerId, CreatePostRequest("Benim birinci"))
+        val removable = service.create(ownerId, CreatePostRequest("Benim ikinci"))
+        service.create(strangerId, CreatePostRequest("Baskasinin gonderisi"))
+
+        // InMemoryPostRepository her yeni gönderiye bir saniye *eski* zaman damgası
+        // veriyor, yani en yeniden eskiye sıralama oluşturma sırasıyla aynı oluyor.
+        val mine = service.postsByOwner(ownerId, ownerId, null, null)
+        assertEquals(listOf("Benim birinci", "Benim ikinci"), mine.items.map { it.text })
+
+        service.delete(ownerId, UUID.fromString(removable.id))
+        assertEquals(listOf("Benim birinci"), service.postsByOwner(ownerId, ownerId, null, null).items.map { it.text })
+
+        assertEquals(1, service.postsByOwner(strangerId, ownerId, null, null).items.size)
     }
 
-    private val postMedia = mutableMapOf<UUID, List<UUID>>()
+    @Test
+    fun `owner listing pages with a cursor`() {
+        repeat(3) { service.create(ownerId, CreatePostRequest("Gönderi $it")) }
 
-    override fun findDetails(postId: UUID, viewerId: UUID): PostDetails? {
-        val post = posts[postId]?.takeIf { it.status == PostStatus.PUBLISHED } ?: return null
-        return details(post, viewerId)
+        val firstPage = service.postsByOwner(ownerId, ownerId, null, 2)
+        assertEquals(2, firstPage.items.size)
+        val cursor = assertNotNull(firstPage.nextCursor)
+
+        val secondPage = service.postsByOwner(ownerId, ownerId, cursor, 2)
+        assertEquals(1, secondPage.items.size)
+        assertNull(secondPage.nextCursor)
+
+        val allIds = (firstPage.items + secondPage.items).map { it.id }
+        assertEquals(allIds.distinct().size, allIds.size)
     }
 
-    override fun feed(viewerId: UUID, cursor: FeedCursor?, limit: Int): List<PostDetails> = posts.values
-        .filter { it.status == PostStatus.PUBLISHED }
-        .sortedWith(compareByDescending<Post> { it.createdAt }.thenByDescending { it.id })
-        .filter { cursor == null || it.createdAt < cursor.createdAt || (it.createdAt == cursor.createdAt && it.id < cursor.id) }
-        .take(limit)
-        .map { details(it, viewerId) }
+    @Test
+    fun `posts carry their topics and unknown topics are rejected`() {
+        val teknoloji = topics.topic("teknoloji")
 
-    override fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): Boolean {
-        val post = posts[postId] ?: return false
-        if (post.ownerId != ownerId || post.status != PostStatus.PUBLISHED) return false
-        posts[postId] = post.copy(status = PostStatus.DELETED, updatedAt = now)
-        return true
+        val post = service.create(ownerId, CreatePostRequest("Konu etiketli gönderi", topicIds = listOf(teknoloji.id.toString())))
+        assertEquals(listOf("teknoloji"), post.topics.map { it.slug })
+
+        assertEquals("UNKNOWN_TOPIC", assertFailsWith<ApiException> {
+            service.create(ownerId, CreatePostRequest("Bilinmeyen konu", topicIds = listOf(UUID.randomUUID().toString())))
+        }.code)
+
+        assertEquals("DUPLICATE_TOPIC", assertFailsWith<ApiException> {
+            service.create(
+                ownerId,
+                CreatePostRequest("Yinelenen konu", topicIds = listOf(teknoloji.id.toString(), teknoloji.id.toString())),
+            )
+        }.code)
     }
-
-    override fun setLike(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long {
-        if (active) likes += postId to userId else likes -= postId to userId
-        return likes.count { it.first == postId }.toLong()
-    }
-
-    override fun setSave(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long {
-        if (active) saves += postId to userId else saves -= postId to userId
-        return saves.count { it.first == postId }.toLong()
-    }
-
-    private fun details(post: Post, viewerId: UUID) = PostDetails(
-        post = post,
-        author = PostAuthorResponse(ownerId.toString(), "Gizem Derici", "gizem"),
-        media = postMedia[post.id].orEmpty().mapNotNull(media::get),
-        likeCount = likes.count { it.first == post.id }.toLong(),
-        saveCount = saves.count { it.first == post.id }.toLong(),
-        likedByViewer = post.id to viewerId in likes,
-        savedByViewer = post.id to viewerId in saves,
-    )
-}
-
-private class FakePostStorage : ObjectStorage {
-    override fun createUploadUrl(key: String, mimeType: String, expiresIn: Duration) = error("unused")
-    override fun inspect(key: String): StoredObjectInfo = error("unused")
-    override fun createDownloadUrl(key: String, expiresIn: Duration) = "http://storage/$key"
-    override fun delete(key: String) = Unit
 }

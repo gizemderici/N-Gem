@@ -7,6 +7,14 @@ data class AppConfig(
     val storage: StorageConfig,
     val verificationCodeTtlMinutes: Long,
     val exposeDevelopmentCodes: Boolean,
+    /**
+     * Yalnızca güvenilir bir vekil sunucunun arkasındayken açılmalı. Açıkken
+     * istemci adresi `X-Forwarded-For` başlığından okunur; kapalıyken bu başlık
+     * yok sayılır çünkü istemci onu istediği gibi doldurabilir.
+     */
+    val trustProxyHeaders: Boolean = false,
+    /** Yarım kalan yüklemelerin ne kadar sonra temizleneceği. */
+    val abandonedUploadTtlHours: Long = 24,
 ) {
     val isProduction: Boolean get() = environment.equals("production", ignoreCase = true)
 
@@ -45,6 +53,8 @@ data class AppConfig(
                 verificationCodeTtlMinutes = env.long("VERIFICATION_CODE_TTL_MINUTES", 10),
                 exposeDevelopmentCodes = !environment.equals("production", true) &&
                     env.boolean("EXPOSE_DEVELOPMENT_CODES", true),
+                trustProxyHeaders = env.boolean("TRUST_PROXY_HEADERS", false),
+                abandonedUploadTtlHours = env.long("ABANDONED_UPLOAD_TTL_HOURS", 24),
             )
         }
     }

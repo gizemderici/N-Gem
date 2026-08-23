@@ -129,7 +129,7 @@ Sıfırlama tamamlandığında kullanıcının bütün refresh oturumları iptal
 | Yöntem | Yol | Açıklama |
 |---|---|---|
 | `POST` | `/api/v1/auth/resend-verification` | Yeni e-posta doğrulama kodu ister |
-| `GET` | `/health` | Servis sağlık kontrolü |
+| `GET` | `/health` | Veritabanı bağlantısını da sınar; erişilemiyorsa `503` döner |
 
 ## Medya yükleme
 
@@ -218,6 +218,7 @@ GET /api/v1/posts/feed?limit=20&personalized=false
 | Yöntem | Yol | Açıklama |
 |---|---|---|
 | `GET` | `/api/v1/posts/{id}` | Tek gönderiyi getirir |
+| `GET` | `/api/v1/users/me/posts` | Kullanıcının kendi gönderileri, kronolojik ve imleçli |
 | `DELETE` | `/api/v1/posts/{id}` | Yalnızca sahibinin gönderisini siler |
 | `PUT` | `/api/v1/posts/{id}/like` | Beğenir; tekrar çağrılması güvenlidir |
 | `DELETE` | `/api/v1/posts/{id}/like` | Beğeniyi kaldırır |
@@ -258,6 +259,83 @@ Desteklenen sinyaller oturum başlangıcı, açık ilgi seçimi, gösterim, gör
 
 Model; konu, üretici ve medya türü yakınlıklarını günün dört zaman diliminde farklı ağırlıklandırır; yenilik, topluluk ilgisi, keşif ve çeşitlilikle birleştirir. Dış veri seti araştırması, dönüştürücüler, model kartı ve gerçek KuaiRand benchmark sonucu [`recommender-lab`](recommender-lab/README.md) klasöründedir.
 
+## Yorumlar
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/api/v1/posts/{postId}/comments` | Yorum yazar; gövde `{ "text": "…" }` |
+| `GET` | `/api/v1/posts/{postId}/comments` | Yorumları listeler; `limit` (1–50) ve `cursor` |
+| `DELETE` | `/api/v1/comments/{id}` | Yorumu siler |
+
+Yorumlar gönderi akışının aksine **eskiden yeniye** sıralanır; sohbet yukarıdan
+aşağıya okunur ve imleç de bu yönde ilerler.
+
+Bir yorumu **yorumun sahibi** ya da **gönderinin sahibi** silebilir. Yetkisiz
+kullanıcıya `403` yerine `404` döner; aksi halde yorumun varlığı açığa çıkardı.
+
+Cevap gövdesi sayfa bilgisinin yanında gönderinin **tamamındaki** yorum sayısını
+da taşır:
+
+```json
+{
+  "items": [
+    {
+      "id": "<uuid>",
+      "postId": "<uuid>",
+      "text": "…",
+      "author": { "id": "<uuid>", "fullName": "…", "username": "…" },
+      "createdAt": "2026-08-23T10:15:30Z",
+      "deletableByMe": true
+    }
+  ],
+  "nextCursor": "eyJ…",
+  "totalCount": 12
+}
+```
+
+Gönderi cevaplarına `commentCount` alanı eklendi.
+
+Doğrulama: metin boş olamaz, en fazla 1000 karakter (`EMPTY_COMMENT`,
+`COMMENT_TOO_LONG`). Silinmiş bir gönderiye yorum yazılamaz (`POST_NOT_FOUND`).
+
+İç içe yanıtlar (thread) bilinçli olarak kapsam dışı: `comments` tablosunda
+`parent_id` sütunu yok. Eklenecekse nullable bir sütun + `parentId` alanı yeterli.
+
+## Profiller ve takip
+
+Kullanıcılar yol içinde **kullanıcı adıyla** anılır. `/users/me` ile çakışma yoktur:
+kullanıcı adı en az üç karakter olmak zorunda olduğu için kimse `me` adını alamaz.
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/api/v1/users/{username}` | Herkese açık profil; gerçek sayaçlar ve `followedByMe` |
+| `GET` | `/api/v1/users/{username}/posts` | Kullanıcının gönderileri, imleçli |
+| `PUT` | `/api/v1/users/{username}/follow` | Takip eder; tekrar çağrılması güvenlidir |
+| `DELETE` | `/api/v1/users/{username}/follow` | Takibi bırakır |
+| `GET` | `/api/v1/users/{username}/followers` | Takipçiler, imleçli |
+| `GET` | `/api/v1/users/{username}/following` | Takip edilenler, imleçli |
+
+Kendini takip etmek `CANNOT_FOLLOW_SELF` ile reddedilir; veritabanında da bir
+`CHECK` kısıtı vardır.
+
+Gönderi ve yorum cevaplarındaki `author` nesnesi artık `followedByMe` taşır;
+kartlardaki takip düğmesi bunu okur.
+
+### Akıştaki takip katmanı
+
+`GET /api/v1/feed` yeni bir katman kazandı. Takip edilen bir yazarın gönderisi,
+konusu ne olursa olsun **takip katmanına** düşer — takip en güçlü sinyaldir ve
+katmanlar dışlayıcıdır, yani aynı gönderi iki katmanda birden görünmez.
+
+On slotluk desen: **2 takip + 5 ana ilgi + 2 ilişkili + 1 keşif**. Pay ilgi
+alanlarından alındı; ilişkili %20 ve keşif %10 oranlarına dokunulmadı. Kullanıcı
+kimseyi takip etmiyorsa takip slotları geri ilgi alanlarına düşer ve dağılım
+eski %70/%20/%10 hâline döner.
+
+- `source` yeni bir değer alabilir: `FOLLOWING`.
+- `mix` yeni bir alan taşır: `following`. Alanı tanımayan istemciler yok sayabilir.
+- Yeni gerekçe kodu: `FOLLOWING` — "Takip ettiğin X paylaştı."
+
 Hatalar tutarlı bir biçimde döner:
 
 ```json
@@ -268,6 +346,33 @@ Hatalar tutarlı bir biçimde döner:
 }
 ```
 
+## İlgi alanları ve başlangıç akışı
+
+Onboarding, kullanıcının ilgi alanlarını **kendi sıraladığı** listeyle başlar; başlangıç
+akışı bu sıralamaya göre üretilir. Endpoint ve JSON ayrıntıları için
+[`docs/api/onboarding-ve-akis.md`](docs/api/onboarding-ve-akis.md).
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/api/v1/topics` | İlgi alanı kataloğu (oturum gerektirmez) |
+| `GET` | `/api/v1/users/me/topics` | Kullanıcının kayıtlı sıralaması |
+| `PUT` | `/api/v1/users/me/topics` | Sıralamayı baştan yazar (3–10 konu) |
+| `GET` | `/api/v1/feed` | Sıralamaya göre karışık başlangıç akışı |
+
+`GET /api/v1/feed` bir sayfayı yaklaşık **%70 ana ilgi + %20 ilişkili konu + %10 keşif**
+dağılımıyla kurar. Oran on slotluk sabit bir desenle uygulanır ve desen imleçte taşınır,
+böylece dağılım sayfa sınırlarında bozulmaz. Bir katman tükenirse boş slotlar önce
+kullanıcının kendi ilgi alanlarından doldurulur.
+
+Her öğe hangi katmandan geldiğini (`source`) ve kısa bir gerekçeyi (`reason.text`)
+taşır; "Neden karşıma çıktı?" alanı doğrudan bu metni gösterebilir.
+
+Bu oranlar bir ürün kararı değil, pilot verisiyle yeniden kalibre edilecek bir başlangıç
+varsayımıdır. Desen `FeedService.PATTERN` içinde tek yerde tanımlıdır.
+
+Gönderiler en fazla üç konuyla etiketlenebilir (`POST /api/v1/posts` → `topicIds`).
+Konusuz gönderiler keşif katmanına düşer.
+
 ## Güvenlik notları
 
 - `.env` ve gerçek sırlar Git'e eklenmez.
@@ -275,21 +380,52 @@ Hatalar tutarlı bir biçimde döner:
 - Parolalar Argon2id ile hash'lenir.
 - Refresh token'ın yalnızca SHA-256 özeti veritabanında saklanır.
 - Doğrulama kodları tek kullanımlık, süreli ve en fazla beş denemeliktir.
-- Giriş ve doğrulama yollarında tek sunucu için temel IP hız sınırlaması vardır. Çoklu sunucuya geçerken bu sayaç Redis'e taşınmalıdır.
 - iOS tarafında token'lar `UserDefaults` yerine Keychain'de tutulmalıdır.
-- Üretime geçmeden önce gerçek e-posta sağlayıcısı `AuthService.dispatchCode` noktasına bağlanmalıdır.
+
+### Hız sınırlaması
+
+Kimlik uçlarında iki katman var:
+
+- **Adres başına** — dakikada 10 istek. Süresi dolan pencereler süpürülür; sayaç sınırsız büyümez.
+- **Hesap başına** — beş dakikada 5 deneme. Yalnızca adrese bakmak dağıtık deneme
+  saldırısını durdurmuyor: saldırgan her denemeyi başka bir adresten yaparsa tek
+  hesabı sınırsızca deneyebilirdi.
+
+`TRUST_PROXY_HEADERS=true` yapılmadıkça `X-Forwarded-For` yok sayılır — istemci
+o başlığı istediği gibi doldurabildiği için. Vekil sunucu arkasına kurulumda bu
+bayrak açılmalı, yoksa bütün kullanıcılar yük dengeleyicinin adresiyle tek kovaya düşer.
+
+Her iki sayaç da tek sunucunun belleğinde. Çoklu sunucuya geçerken ikisi de Redis'e taşınmalı.
+
+### E-posta gönderimi
+
+`VerificationMailer` arayüzü sağlayıcıdan bağımsızdır. Şu an devrede olan
+`LoggingVerificationMailer` geliştirmede kodu log'a yazar, **üretimde yazmaz** ve
+hata basar — çünkü sağlayıcı bağlanmadan kayıt akışı tamamlanamaz.
+
+Gerçek sağlayıcı bağlamak için arayüzü uygulayan bir sınıf yazıp
+`Application.module()` içinde geçmek yeterli; `AuthService` değişmez.
+
+### Medya yaşam döngüsü
+
+- Bir gönderi silindiğinde görselleri de silinmiş işaretlenir, `post_media`
+  satırları kaldırılır ve dosyalar depodan atılır.
+- `MediaJanitor` saatte bir çalışıp yarım kalan (`PENDING`) yüklemeleri toplar;
+  eşik `ABANDONED_UPLOAD_TTL_HOURS` ile ayarlanır.
 
 ## Sonraki backend dilimi
 
-Authentication tamamlandıktan sonra kullanıcı sahipliğine bağlı görsel yükleme geliştirilecektir:
+Onboarding ve başlangıç akışı tamamlandı. Sıradaki dilim davranış verilerinin toplanması:
 
-1. Mobil uygulama yükleme kaydı oluşturur.
-2. Backend süreli S3/MinIO yükleme adresi verir.
-3. Mobil uygulama görseli doğrudan depolamaya yükler.
-4. Backend MIME türü, boyut ve sahipliği doğrular.
-5. Tamamlanan görsel bir gönderiye bağlanır.
+1. `POST /api/v1/events` — mobil uygulamadan gelen beğeni, kaydetme, atlama,
+   içerik açma, görünür kalma ve video izleme olayları.
+2. Benzersiz olay kimliğiyle tekrar gönderimin engellenmesi (idempotency).
+3. Olayların kullanıcı, içerik, akış katmanı ve oturum bağlamıyla ilişkilendirilmesi.
+4. Olaylardan konu bazlı ilgi skorlarının hesaplanması.
+5. Öğrenilmiş Nexi Akışı ve iki akış arası geçiş.
 
-İlk dört adım uygulanmıştır. Sonraki dilim, hazır `mediaId` değerlerini gönderi kayıtlarına bağlayacaktır.
+Ondan sonra kullanıcı kontrolü tarafı gelir: öğrenmeyi duraklatma, modeli sıfırlama
+ve verileri silme.
 
 ## iOS bağlantısı
 

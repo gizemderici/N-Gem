@@ -2,6 +2,8 @@ package com.nexi.posts
 
 import com.nexi.media.MediaAsset
 import com.nexi.media.MediaStatus
+import com.nexi.topics.Topic
+import com.nexi.topics.toTopic
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.Timestamp
@@ -10,24 +12,61 @@ import java.util.UUID
 import javax.sql.DataSource
 
 interface PostRepository {
-    fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, now: Instant): Post
+    fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, topicIds: List<UUID>, now: Instant): Post
     fun findDetails(postId: UUID, viewerId: UUID): PostDetails?
     fun feed(viewerId: UUID, cursor: FeedCursor?, limit: Int): List<PostDetails>
-    fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): Boolean
+
+    /**
+     * Tek bir kullanıcının gönderileri, kronolojik. Etkileşim durumu [viewerId]
+     * için hesaplanır; profil sahibi başkasının profiline baktığında da doğru olsun.
+     */
+    fun postsByOwner(ownerId: UUID, viewerId: UUID, cursor: FeedCursor?, limit: Int): List<PostDetails>
+
+    /**
+     * Tek bir akış katmanının kronolojik sayfası. Medya ve konular yüklenmez;
+     * karışım kurulduktan sonra yalnızca sayfaya giren gönderiler için [hydrate] çağrılır.
+     */
+    fun feedTier(
+        viewerId: UUID,
+        tier: FeedTier,
+        priorityTopicCount: Int,
+        cursor: FeedCursor?,
+        limit: Int,
+    ): List<PostDetails>
+
+    /** Verilen gönderilerin medya ve konu bilgilerini toplu olarak doldurur. */
+    fun hydrate(details: List<PostDetails>): List<PostDetails>
+
+    /**
+     * Gönderiyi siler ve bağlı görselleri serbest bırakır.
+     *
+     * @return Depodan silinmesi gereken anahtarlar; gönderi bulunamadıysa `null`.
+     *   Boş liste "silindi ama görseli yoktu" demek, bu yüzden `Boolean` yerine
+     *   nullable liste dönüyoruz.
+     */
+    fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): List<String>?
     fun setLike(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long
     fun setSave(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long
 }
 
 class MediaOwnershipException : RuntimeException()
 class MediaAlreadyAttachedException : RuntimeException()
+class UnknownTopicException : RuntimeException()
 
 class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
-    override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, now: Instant): Post {
+
+    private companion object {
+        /** `detailsSelect` içinde viewerId'nin kaç kez bağlandığı: beğeni, kayıt, takip. */
+        const val VIEWER_BINDINGS = 3
+    }
+
+    override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, topicIds: List<UUID>, now: Instant): Post {
         val post = Post(UUID.randomUUID(), ownerId, body, PostStatus.PUBLISHED, now, now)
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
                 validateMedia(connection, ownerId, mediaIds)
+                validateTopics(connection, topicIds)
                 connection.prepareStatement(
                     "INSERT INTO posts (id, owner_id, body, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
                 ).use { statement ->
@@ -50,6 +89,16 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                     }
                     if (mediaIds.isNotEmpty()) statement.executeBatch()
                 }
+                connection.prepareStatement(
+                    "INSERT INTO post_topics (post_id, topic_id) VALUES (?, ?)"
+                ).use { statement ->
+                    topicIds.forEach { topicId ->
+                        statement.setObject(1, post.id)
+                        statement.setObject(2, topicId)
+                        statement.addBatch()
+                    }
+                    if (topicIds.isNotEmpty()) statement.executeBatch()
+                }
                 connection.commit()
             } catch (exception: Throwable) {
                 connection.rollback()
@@ -65,12 +114,13 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         val details = connection.prepareStatement("${detailsSelect()} WHERE p.id = ? AND p.status = 'PUBLISHED'").use { statement ->
             statement.setObject(1, viewerId)
             statement.setObject(2, viewerId)
-            statement.setObject(3, postId)
+            statement.setObject(3, viewerId)
+            statement.setObject(4, postId)
             statement.executeQuery().use { results ->
                 if (results.next()) results.toDetails() else null
             }
         }
-        details?.copy(media = connection.loadMedia(details.post.id))
+        details?.let { connection.hydrate(listOf(it)).single() }
     }
 
     override fun feed(viewerId: UUID, cursor: FeedCursor?, limit: Int): List<PostDetails> =
@@ -80,8 +130,8 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                 "${detailsSelect()} WHERE p.status = 'PUBLISHED' $cursorClause ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
             ).use { statement ->
                 var index = 1
-                statement.setObject(index++, viewerId)
-                statement.setObject(index++, viewerId)
+                // detailsSelect üç kez viewerId bekliyor: beğeni, kayıt ve takip kontrolü.
+                repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
                 if (cursor != null) {
                     statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
                     statement.setObject(index++, cursor.id)
@@ -90,20 +140,130 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                 val details = statement.executeQuery().use { results ->
                     buildList { while (results.next()) add(results.toDetails()) }
                 }
-                details.map { it.copy(media = connection.loadMedia(it.post.id)) }
+                connection.hydrate(details)
             }
         }
 
-    override fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): Boolean = dataSource.connection.use { connection ->
+    override fun postsByOwner(ownerId: UUID, viewerId: UUID, cursor: FeedCursor?, limit: Int): List<PostDetails> =
+        dataSource.connection.use { connection ->
+            val cursorClause = if (cursor == null) "" else "AND (p.created_at, p.id) < (?, ?)"
+            connection.prepareStatement(
+                "${detailsSelect()} WHERE p.owner_id = ? AND p.status = 'PUBLISHED' $cursorClause " +
+                    "ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
+            ).use { statement ->
+                var index = 1
+                repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
+                statement.setObject(index++, ownerId)
+                if (cursor != null) {
+                    statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
+                    statement.setObject(index++, cursor.id)
+                }
+                statement.setInt(index, limit)
+                val details = statement.executeQuery().use { results ->
+                    buildList { while (results.next()) add(results.toDetails()) }
+                }
+                connection.hydrate(details)
+            }
+        }
+
+    override fun feedTier(
+        viewerId: UUID,
+        tier: FeedTier,
+        priorityTopicCount: Int,
+        cursor: FeedCursor?,
+        limit: Int,
+    ): List<PostDetails> = dataSource.connection.use { connection ->
+        val bindings = MutableList<Any>(VIEWER_BINDINGS) { viewerId }
+        val tierClause = tierClause(tier, viewerId, priorityTopicCount, bindings)
+        val cursorClause = if (cursor == null) {
+            ""
+        } else {
+            bindings += Timestamp.from(cursor.createdAt)
+            bindings += cursor.id
+            "AND (p.created_at, p.id) < (?, ?)"
+        }
+        bindings += limit
+
         connection.prepareStatement(
-            "UPDATE posts SET status = 'DELETED', updated_at = ? WHERE id = ? AND owner_id = ? AND status = 'PUBLISHED'"
+            "${detailsSelect()} WHERE p.status = 'PUBLISHED' AND $tierClause $cursorClause " +
+                "ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
         ).use { statement ->
-            statement.setTimestamp(1, Timestamp.from(now))
-            statement.setObject(2, postId)
-            statement.setObject(3, ownerId)
-            statement.executeUpdate() == 1
+            bindings.forEachIndexed { index, value ->
+                when (value) {
+                    is Timestamp -> statement.setTimestamp(index + 1, value)
+                    is Int -> statement.setInt(index + 1, value)
+                    else -> statement.setObject(index + 1, value)
+                }
+            }
+            statement.executeQuery().use { results ->
+                buildList { while (results.next()) add(results.toDetails()) }
+            }
         }
     }
+
+    override fun hydrate(details: List<PostDetails>): List<PostDetails> {
+        if (details.isEmpty()) return details
+        return dataSource.connection.use { connection -> connection.hydrate(details) }
+    }
+
+    /**
+     * Tek işlemde: gönderiyi silinmiş işaretle, görsellerini de silinmiş işaretle
+     * ve bağlantı satırlarını kaldır.
+     *
+     * Bağlantı satırları kalırsa `UNIQUE (media_id)` kısıtı yüzünden o görsel bir
+     * daha hiçbir gönderide kullanılamıyor ve depodaki dosya sonsuza kadar kalıyordu.
+     */
+    override fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): List<String>? =
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                val deleted = connection.prepareStatement(
+                    "UPDATE posts SET status = 'DELETED', updated_at = ? WHERE id = ? AND owner_id = ? AND status = 'PUBLISHED'"
+                ).use { statement ->
+                    statement.setTimestamp(1, Timestamp.from(now))
+                    statement.setObject(2, postId)
+                    statement.setObject(3, ownerId)
+                    statement.executeUpdate() == 1
+                }
+                if (!deleted) {
+                    connection.rollback()
+                    return@use null
+                }
+
+                val storageKeys = connection.prepareStatement(
+                    """SELECT m.storage_key FROM post_media pm
+                       JOIN media_assets m ON m.id = pm.media_id
+                       WHERE pm.post_id = ?"""
+                ).use { statement ->
+                    statement.setObject(1, postId)
+                    statement.executeQuery().use { results ->
+                        buildList { while (results.next()) add(results.getString("storage_key")) }
+                    }
+                }
+
+                connection.prepareStatement(
+                    """UPDATE media_assets SET status = 'DELETED', updated_at = ?
+                       WHERE id IN (SELECT media_id FROM post_media WHERE post_id = ?)"""
+                ).use { statement ->
+                    statement.setTimestamp(1, Timestamp.from(now))
+                    statement.setObject(2, postId)
+                    statement.executeUpdate()
+                }
+
+                connection.prepareStatement("DELETE FROM post_media WHERE post_id = ?").use { statement ->
+                    statement.setObject(1, postId)
+                    statement.executeUpdate()
+                }
+
+                connection.commit()
+                storageKeys
+            } catch (exception: Throwable) {
+                connection.rollback()
+                throw exception
+            } finally {
+                connection.autoCommit = true
+            }
+        }
 
     override fun setLike(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long =
         setInteraction("post_likes", postId, userId, active, now)
@@ -159,13 +319,73 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         }
     }
 
+    private fun validateTopics(connection: Connection, topicIds: List<UUID>) {
+        if (topicIds.isEmpty()) return
+        connection.prepareStatement("SELECT COUNT(*) FROM topics WHERE active AND id = ANY(?)").use { statement ->
+            statement.setArray(1, connection.createArrayOf("uuid", topicIds.toTypedArray()))
+            statement.executeQuery().use { results ->
+                results.next()
+                if (results.getInt(1) != topicIds.size) throw UnknownTopicException()
+            }
+        }
+    }
+
+    /**
+     * Katman koşulları dışlayıcıdır; alt katmanlar üst katmanlara düşen gönderileri
+     * `NOT EXISTS` ile eler, böylece bir gönderi akışta iki kez görünmez.
+     */
+    private fun tierClause(
+        tier: FeedTier,
+        viewerId: UUID,
+        priorityTopicCount: Int,
+        bindings: MutableList<Any>,
+    ): String {
+        fun selected(comparison: String): String {
+            bindings += viewerId
+            bindings += priorityTopicCount
+            return """EXISTS (SELECT 1 FROM post_topics pt JOIN user_topics ut ON ut.topic_id = pt.topic_id
+                              WHERE pt.post_id = p.id AND ut.user_id = ? AND ut.position $comparison ?)"""
+        }
+
+        fun anySelected(): String {
+            bindings += viewerId
+            return """EXISTS (SELECT 1 FROM post_topics pt JOIN user_topics ut ON ut.topic_id = pt.topic_id
+                              WHERE pt.post_id = p.id AND ut.user_id = ?)"""
+        }
+
+        fun anyRelated(): String {
+            bindings += viewerId
+            return """EXISTS (SELECT 1 FROM post_topics pt
+                              JOIN topic_relations tr ON tr.related_topic_id = pt.topic_id
+                              JOIN user_topics ut ON ut.topic_id = tr.topic_id AND ut.user_id = ?
+                              WHERE pt.post_id = p.id)"""
+        }
+
+        fun followed(): String {
+            bindings += viewerId
+            return "EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id)"
+        }
+
+        // Takip en üstte: alt katmanların hepsi "takip edilmiyor" koşulunu ekler,
+        // yoksa takip ettiğin birinin gönderisi hem burada hem konu katmanında çıkardı.
+        return when (tier) {
+            FeedTier.FOLLOWING -> followed()
+            FeedTier.PRIORITY_TOPIC -> "NOT ${followed()} AND ${selected("<")}"
+            FeedTier.OTHER_TOPIC -> "NOT ${followed()} AND ${selected(">=")} AND NOT ${selected("<")}"
+            FeedTier.RELATED_TOPIC -> "NOT ${followed()} AND NOT ${anySelected()} AND ${anyRelated()}"
+            FeedTier.DISCOVERY -> "NOT ${followed()} AND NOT ${anySelected()} AND NOT ${anyRelated()}"
+        }
+    }
+
     private fun detailsSelect() =
         """SELECT p.id, p.owner_id, p.body, p.status, p.created_at, p.updated_at,
                   u.full_name, u.username,
                   (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id) AS like_count,
                   (SELECT COUNT(*) FROM post_saves ps WHERE ps.post_id = p.id) AS save_count,
+                  (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id AND c.status = 'PUBLISHED') AS comment_count,
                   EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = ?) AS liked_by_viewer,
-                  EXISTS(SELECT 1 FROM post_saves ps WHERE ps.post_id = p.id AND ps.user_id = ?) AS saved_by_viewer
+                  EXISTS(SELECT 1 FROM post_saves ps WHERE ps.post_id = p.id AND ps.user_id = ?) AS saved_by_viewer,
+                  EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id) AS author_followed
            FROM posts p JOIN users u ON u.id = p.owner_id"""
 
     private fun ResultSet.toDetails(): PostDetails {
@@ -183,24 +403,41 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                 id = post.ownerId.toString(),
                 fullName = getString("full_name"),
                 username = getString("username"),
+                followedByMe = getBoolean("author_followed"),
             ),
             media = emptyList(),
+            topics = emptyList(),
             likeCount = getLong("like_count"),
             saveCount = getLong("save_count"),
+            commentCount = getLong("comment_count"),
             likedByViewer = getBoolean("liked_by_viewer"),
             savedByViewer = getBoolean("saved_by_viewer"),
         )
     }
 
-    private fun Connection.loadMedia(postId: UUID): List<MediaAsset> = prepareStatement(
-        """SELECT m.* FROM post_media pm JOIN media_assets m ON m.id = pm.media_id
-           WHERE pm.post_id = ? ORDER BY pm.position"""
+    private fun Connection.hydrate(details: List<PostDetails>): List<PostDetails> {
+        if (details.isEmpty()) return details
+        val postIds = details.map { it.post.id }
+        val media = loadMedia(postIds)
+        val topics = loadTopics(postIds)
+        return details.map { item ->
+            item.copy(
+                media = media[item.post.id].orEmpty(),
+                topics = topics[item.post.id].orEmpty(),
+            )
+        }
+    }
+
+    private fun Connection.loadMedia(postIds: List<UUID>): Map<UUID, List<MediaAsset>> = prepareStatement(
+        """SELECT pm.post_id, m.* FROM post_media pm JOIN media_assets m ON m.id = pm.media_id
+           WHERE pm.post_id = ANY(?) ORDER BY pm.post_id, pm.position"""
     ).use { statement ->
-        statement.setObject(1, postId)
+        statement.setArray(1, createArrayOf("uuid", postIds.toTypedArray()))
         statement.executeQuery().use { results ->
-            buildList {
+            buildMap<UUID, MutableList<MediaAsset>> {
                 while (results.next()) {
-                    add(
+                    val postId = results.getObject("post_id", UUID::class.java)
+                    getOrPut(postId) { mutableListOf() }.add(
                         MediaAsset(
                             id = results.getObject("id", UUID::class.java),
                             ownerId = results.getObject("owner_id", UUID::class.java),
@@ -214,6 +451,22 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                             updatedAt = results.getTimestamp("updated_at").toInstant(),
                         )
                     )
+                }
+            }
+        }
+    }
+
+    private fun Connection.loadTopics(postIds: List<UUID>): Map<UUID, List<Topic>> = prepareStatement(
+        """SELECT pt.post_id, t.id, t.slug, t.name, t.description, t.icon, t.color_hex, t.display_order
+           FROM post_topics pt JOIN topics t ON t.id = pt.topic_id
+           WHERE pt.post_id = ANY(?) ORDER BY pt.post_id, t.display_order"""
+    ).use { statement ->
+        statement.setArray(1, createArrayOf("uuid", postIds.toTypedArray()))
+        statement.executeQuery().use { results ->
+            buildMap<UUID, MutableList<Topic>> {
+                while (results.next()) {
+                    val postId = results.getObject("post_id", UUID::class.java)
+                    getOrPut(postId) { mutableListOf() }.add(results.toTopic())
                 }
             }
         }

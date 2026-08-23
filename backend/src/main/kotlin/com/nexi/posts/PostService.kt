@@ -10,6 +10,7 @@ import com.nexi.recommendations.RecommendationEvent
 import com.nexi.recommendations.RecommendationEventType
 import com.nexi.recommendations.RecommendationRepository
 import io.ktor.http.HttpStatusCode
+import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Duration
@@ -25,12 +26,16 @@ class PostService(
     private val recommendationRepository: RecommendationRepository = EmptyRecommendationRepository,
     private val ranker: ContextualRanker = ContextualRanker(),
 ) {
+    private val logger = LoggerFactory.getLogger(PostService::class.java)
     private val mediaUrlExpiry = Duration.ofMinutes(15)
 
     fun create(ownerId: UUID, request: CreatePostRequest): PostResponse {
         val body = request.text.trim()
         if (body.length > 2_000) throw validation("POST_TOO_LONG", "Gönderi metni en fazla 2000 karakter olabilir.", "text")
         if (request.mediaIds.size > 4) throw validation("TOO_MANY_MEDIA", "Bir gönderiye en fazla dört görsel eklenebilir.", "mediaIds")
+        if (request.topicIds.size > MAX_POST_TOPICS) {
+            throw validation("TOO_MANY_TOPICS", "Bir gönderiye en fazla $MAX_POST_TOPICS konu eklenebilir.", "topicIds")
+        }
 
         val mediaIds = request.mediaIds.map { rawId ->
             runCatching { UUID.fromString(rawId) }.getOrElse {
@@ -40,16 +45,26 @@ class PostService(
         if (mediaIds.distinct().size != mediaIds.size) {
             throw validation("DUPLICATE_MEDIA", "Aynı görsel bir gönderiye birden fazla eklenemez.", "mediaIds")
         }
+        val topicIds = request.topicIds.map { rawId ->
+            runCatching { UUID.fromString(rawId) }.getOrElse {
+                throw validation("INVALID_TOPIC_ID", "Konu kimliği geçersiz.", "topicIds")
+            }
+        }
+        if (topicIds.distinct().size != topicIds.size) {
+            throw validation("DUPLICATE_TOPIC", "Aynı konu bir gönderiye birden fazla eklenemez.", "topicIds")
+        }
         if (body.isBlank() && mediaIds.isEmpty()) {
             throw validation("EMPTY_POST", "Gönderi metni veya en az bir görsel gerekli.")
         }
 
         val post = try {
-            repository.create(ownerId, body, mediaIds, clock.instant())
+            repository.create(ownerId, body, mediaIds, topicIds, clock.instant())
         } catch (_: MediaOwnershipException) {
             throw validation("MEDIA_NOT_AVAILABLE", "Medya dosyalarından biri hazır değil veya sana ait değil.", "mediaIds")
         } catch (_: MediaAlreadyAttachedException) {
             throw ApiException(HttpStatusCode.Conflict, "MEDIA_ALREADY_ATTACHED", "Medya dosyalarından biri başka bir gönderide kullanılıyor.")
+        } catch (_: UnknownTopicException) {
+            throw validation("UNKNOWN_TOPIC", "Seçilen konulardan biri kullanılamıyor.", "topicIds")
         }
         val details = repository.findDetails(post.id, ownerId)
             ?: throw ApiException(HttpStatusCode.InternalServerError, "POST_CREATION_FAILED", "Gönderi oluşturulamadı.")
@@ -73,11 +88,31 @@ class PostService(
         if (cursor == null && personalizationEnabled && recommendationRepository.personalizationAvailable) {
             return personalizedFeed(viewerId, limit, recommendationContext)
         }
-        val details = repository.feed(viewerId, cursor, limit + 1)
+
+        return page(cursor, limit) { pageCursor, size -> repository.feed(viewerId, pageCursor, size) }
+    }
+
+    /** Profil ekranının listesi: kullanıcının kendi gönderileri, kronolojik. */
+    fun postsByOwner(ownerId: UUID, viewerId: UUID, rawCursor: String?, requestedLimit: Int?): FeedResponse =
+        page(
+            rawCursor?.let { decodeCursor(it) },
+            (requestedLimit ?: DEFAULT_PAGE_SIZE).coerceIn(1, MAX_PAGE_SIZE),
+        ) { cursor, size -> repository.postsByOwner(ownerId, viewerId, cursor, size) }
+
+    /**
+     * Kronolojik sayfalamanın ortak kısmı: bir fazla kayıt çekip devamı olup
+     * olmadığını anlıyor, imleci son öğeden üretiyor.
+     */
+    private fun page(
+        cursor: FeedCursor?,
+        limit: Int,
+        load: (FeedCursor?, Int) -> List<PostDetails>,
+    ): FeedResponse {
+        val details = load(cursor, limit + 1)
         val hasMore = details.size > limit
-        val page = details.take(limit)
-        val nextCursor = if (hasMore) page.lastOrNull()?.post?.let(::encodeCursor) else null
-        return FeedResponse(page.map(::response), nextCursor)
+        val items = details.take(limit)
+        val nextCursor = if (hasMore) items.lastOrNull()?.post?.let { encodeCursor(it) } else null
+        return FeedResponse(items.map(::response), nextCursor)
     }
 
     private fun personalizedFeed(
@@ -126,8 +161,15 @@ class PostService(
     }
 
     fun delete(ownerId: UUID, postId: UUID) {
-        if (!repository.markDeleted(postId, ownerId, clock.instant())) {
-            throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
+        val releasedKeys = repository.markDeleted(postId, ownerId, clock.instant())
+            ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
+
+        // Veritabanı zaten tutarlı; depodan silme başarısız olursa isteği
+        // düşürmüyoruz. Arta kalan dosyayı MediaJanitor'ın süpürmesi yakalar.
+        releasedKeys.forEach { key ->
+            runCatching { storage.delete(key) }.onFailure {
+                logger.warn("Could not remove stored object for deleted post: key={}", key, it)
+            }
         }
     }
 
@@ -149,36 +191,26 @@ class PostService(
         }
     }
 
-    private fun response(details: PostDetails, recommendationReason: String? = null): PostResponse = PostResponse(
-        id = details.post.id.toString(),
-        text = details.post.body,
-        author = details.author,
-        media = details.media.map { media ->
-            PostMediaResponse(
-                id = media.id.toString(),
-                mimeType = media.mimeType,
-                url = storage.createDownloadUrl(media.storageKey, mediaUrlExpiry),
-                urlExpiresInSeconds = mediaUrlExpiry.seconds,
-            )
-        },
-        likeCount = details.likeCount,
-        saveCount = details.saveCount,
-        likedByMe = details.likedByViewer,
-        savedByMe = details.savedByViewer,
-        createdAt = details.post.createdAt.toString(),
-        recommendationReason = recommendationReason,
-    )
+    private fun response(details: PostDetails, recommendationReason: String? = null): PostResponse =
+        details.toResponse(storage::createDownloadUrl, mediaUrlExpiry)
+            .copy(recommendationReason = recommendationReason)
 
-    private fun encodeCursor(post: Post): String {
-        val raw = "${post.createdAt.toEpochMilli()}|${post.id}"
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
-    }
+    companion object {
+        const val MAX_POST_TOPICS = 3
+        const val DEFAULT_PAGE_SIZE = 20
+        const val MAX_PAGE_SIZE = 50
 
-    private fun decodeCursor(rawCursor: String): FeedCursor = try {
-        val decoded = String(Base64.getUrlDecoder().decode(rawCursor), StandardCharsets.UTF_8)
-        val parts = decoded.split('|', limit = 2)
-        FeedCursor(Instant.ofEpochMilli(parts[0].toLong()), UUID.fromString(parts[1]))
-    } catch (_: Throwable) {
-        throw ApiException(HttpStatusCode.BadRequest, "INVALID_CURSOR", "Akış imleci geçersiz.", "cursor")
+        internal fun encodeCursor(post: Post): String {
+            val raw = "${post.createdAt.toEpochMilli()}|${post.id}"
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
+        }
+
+        internal fun decodeCursor(rawCursor: String): FeedCursor = try {
+            val decoded = String(Base64.getUrlDecoder().decode(rawCursor), StandardCharsets.UTF_8)
+            val parts = decoded.split('|', limit = 2)
+            FeedCursor(Instant.ofEpochMilli(parts[0].toLong()), UUID.fromString(parts[1]))
+        } catch (_: Throwable) {
+            throw ApiException(HttpStatusCode.BadRequest, "INVALID_CURSOR", "Akış imleci geçersiz.", "cursor")
+        }
     }
 }

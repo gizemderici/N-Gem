@@ -2,15 +2,21 @@ package com.nexi
 
 import com.nexi.auth.ApiException
 import com.nexi.auth.AuthService
+import com.nexi.auth.AuthThrottle
 import com.nexi.auth.ErrorResponse
 import com.nexi.auth.JdbcAuthRepository
 import com.nexi.auth.PasswordHasher
-import com.nexi.auth.RequestRateLimiter
 import com.nexi.auth.TokenService
 import com.nexi.auth.authRoutes
+import com.nexi.comments.CommentService
+import com.nexi.comments.JdbcCommentRepository
+import com.nexi.comments.commentRoutes
 import com.nexi.config.AppConfig
 import com.nexi.config.DatabaseFactory
+import com.nexi.feed.FeedService
+import com.nexi.feed.feedRoutes
 import com.nexi.media.JdbcMediaRepository
+import com.nexi.media.MediaJanitor
 import com.nexi.media.MediaService
 import com.nexi.media.S3ObjectStorage
 import com.nexi.media.mediaRoutes
@@ -21,6 +27,12 @@ import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.JdbcRecommendationRepository
 import com.nexi.recommendations.RecommendationService
 import com.nexi.recommendations.recommendationRoutes
+import com.nexi.profiles.JdbcProfileRepository
+import com.nexi.profiles.ProfileService
+import com.nexi.profiles.profileRoutes
+import com.nexi.topics.JdbcTopicRepository
+import com.nexi.topics.TopicService
+import com.nexi.topics.topicRoutes
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
@@ -40,9 +52,16 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.slf4j.event.Level
+import java.time.Duration
+
+private const val HEALTH_CHECK_TIMEOUT_SECONDS = 2
+private val SWEEP_INTERVAL_MILLIS = Duration.ofHours(1).toMillis()
 
 fun Application.module() {
     val config = AppConfig.fromEnvironment()
@@ -57,10 +76,13 @@ fun Application.module() {
         config = config,
     )
 
-    val mediaService = MediaService(JdbcMediaRepository(dataSource), objectStorage, config.storage)
     val postRepository = JdbcPostRepository(dataSource)
+    val topicRepository = JdbcTopicRepository(dataSource)
+    val mediaRepository = JdbcMediaRepository(dataSource)
     val recommendationRepository = JdbcRecommendationRepository(dataSource)
     val ranker = ContextualRanker()
+
+    val mediaService = MediaService(mediaRepository, objectStorage, config.storage)
     val postService = PostService(
         repository = postRepository,
         storage = objectStorage,
@@ -72,8 +94,24 @@ fun Application.module() {
         postRepository = postRepository,
         ranker = ranker,
     )
+    val commentService = CommentService(JdbcCommentRepository(dataSource))
+    val profileService = ProfileService(JdbcProfileRepository(dataSource))
+    val topicService = TopicService(topicRepository)
+    val feedService = FeedService(postRepository, topicRepository, objectStorage)
+    val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
+
+    val janitor = MediaJanitor(mediaRepository, objectStorage)
+    val janitorJob = launch {
+        val ttl = Duration.ofHours(config.abandonedUploadTtlHours)
+        while (isActive) {
+            runCatching { janitor.sweepAbandonedUploads(ttl) }
+                .onFailure { appLogger.warn("Abandoned upload sweep failed", it) }
+            delay(SWEEP_INTERVAL_MILLIS)
+        }
+    }
 
     monitor.subscribe(ApplicationStopped) {
+        janitorJob.cancel()
         objectStorage.close()
         dataSource.close()
     }
@@ -81,7 +119,9 @@ fun Application.module() {
     install(CallLogging) { level = Level.INFO }
     install(ContentNegotiation) {
         json(Json {
-            ignoreUnknownKeys = false
+            // Bilinmeyen alanları yok sayıyoruz: aksi halde mobil taraf yeni bir
+            // alan göndermeye başladığı an eski sunucu bütün istekleri 400'lerdi.
+            ignoreUnknownKeys = true
             explicitNulls = false
             encodeDefaults = true
         })
@@ -126,12 +166,31 @@ fun Application.module() {
     }
 
     routing {
+        // Gerçek kontrol: veritabanına ulaşamıyorsak sağlıklı değiliz. Yük
+        // dengeleyici koşulsuz "ok" gören bir uçtan hiçbir şey öğrenemez.
         get("/health") {
-            call.respond(mapOf("status" to "ok", "service" to "nexi-backend"))
+            val databaseUp = runCatching {
+                dataSource.connection.use { it.isValid(HEALTH_CHECK_TIMEOUT_SECONDS) }
+            }.getOrDefault(false)
+
+            call.respond(
+                if (databaseUp) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable,
+                mapOf(
+                    "status" to if (databaseUp) "ok" else "degraded",
+                    "service" to "nexi-backend",
+                    "database" to if (databaseUp) "up" else "down",
+                ),
+            )
         }
-        authRoutes(authService, RequestRateLimiter())
+        authRoutes(authService, authThrottle)
         mediaRoutes(mediaService)
         postRoutes(postService)
         recommendationRoutes(recommendationService)
+        commentRoutes(commentService)
+        // Profil yolları `/users/{username}` desenini kullanıyor; `/users/me`
+        // literal olduğu için ondan önce eşleşir, çakışma yok.
+        profileRoutes(profileService, postService)
+        topicRoutes(topicService)
+        feedRoutes(feedService)
     }
 }
