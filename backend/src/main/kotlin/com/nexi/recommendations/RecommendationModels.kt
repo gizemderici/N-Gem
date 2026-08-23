@@ -9,6 +9,20 @@ import java.util.UUID
 enum class RecommendationEventType {
     @SerialName("session_started") SESSION_STARTED,
     @SerialName("interest_selected") INTEREST_SELECTED,
+
+    /**
+     * Backend bir gönderiyi akışa koydu. Kullanıcının gördüğünün kanıtı
+     * değildir; yalnızca aday havuzundan seçildiğini söyler.
+     *
+     * Bu ayrım olmadan sunum kaydı `content_impression` olarak yazılıyordu ve
+     * gösterim satırlarının tamamı aslında sunum kaydıydı. Eğitim verisi bu
+     * tablodan üretileceği için ikisinin karışması modele "gösterildi" diye
+     * hiç görülmemiş içerik öğretirdi. Yalnızca sunucu üretir; istemciden
+     * gelirse reddedilir.
+     */
+    @SerialName("feed_served") FEED_SERVED,
+
+    /** Gönderi ekranda gerçekten görünür oldu; istemci ölçer. */
     @SerialName("content_impression") CONTENT_IMPRESSION,
     @SerialName("content_view") CONTENT_VIEW,
     @SerialName("content_complete") CONTENT_COMPLETE,
@@ -89,6 +103,8 @@ data class RecommendationSignal(
     val postId: UUID?,
     val authorId: UUID?,
     val body: String?,
+    /** Gönderiye yazarının eklediği konuların slug'ları; konu yakınlığı buradan gelir. */
+    val topicSlugs: List<String> = emptyList(),
     val mediaType: String?,
     val dwellMillis: Long?,
     val completionRatio: Double?,

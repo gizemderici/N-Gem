@@ -1,6 +1,7 @@
 package com.nexi.recommendations
 
 import com.nexi.posts.PostDetails
+import com.nexi.topics.TopicCatalog
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
@@ -137,7 +138,8 @@ private data class ContentFeatures(val keys: Set<String>) {
                 buildSet {
                     add("creator:${details.post.ownerId}")
                     add("media:$mediaType")
-                    addAll(textFeatures(details.post.body))
+                    addAll(topicFeatures(details.topics.map { it.slug }, details.post.body))
+                    addAll(textTokens(details.post.body))
                 }
             )
         }
@@ -152,7 +154,8 @@ private data class SignalFeatures(val keys: Set<String>) {
                 buildSet {
                     signal.authorId?.let { add("creator:$it") }
                     signal.mediaType?.let { add("media:$it") }
-                    signal.body?.let { addAll(textFeatures(it)) }
+                    addAll(topicFeatures(signal.topicSlugs, signal.body))
+                    signal.body?.let { addAll(textTokens(it)) }
                 }
             )
         }
@@ -181,39 +184,70 @@ private val stopWords = setOf(
     "ama", "bir", "bize", "bizi", "bu", "çok", "daha", "değil", "diye", "gibi", "için", "ile",
     "olan", "olarak", "sonra", "şey", "var", "veya", "yeni", "the", "and", "for", "that", "this", "with"
 )
-private val topicAliases = mapOf(
-    "technology" to setOf("teknoloji", "yapay", "zeka", "yazılım", "kodlama", "mobil", "uygulama"),
-    "design" to setOf("tasarım", "arayüz", "deneyim", "ürün", "mimari"),
-    "education" to setOf("eğitim", "öğren", "ders", "kitap", "bilgi", "anlatım"),
-    "sports" to setOf("spor", "futbol", "basketbol", "koşu", "maç"),
-    "culture" to setOf("kültür", "sanat", "müzik", "sinema", "tiyatro"),
-    "gaming" to setOf("oyun", "gaming", "espor"),
-    "agenda" to setOf("gündem", "haber", "bugün", "sondakika"),
-    "science" to setOf("bilim", "araştırma", "uzay", "fizik", "biyoloji"),
-    "local" to setOf("yerel", "istanbul", "ankara", "izmir", "etkinlik"),
-    "comedy" to setOf("mizah", "komik", "espri", "gül", "eğlence"),
+/**
+ * Konusuz gönderiler için metinden konu tahmini.
+ *
+ * Anahtarlar [TopicCatalog] slug'larıdır; daha önce buradaki liste mobil
+ * uygulamalardaki İngilizce sabitleri kopyalıyordu ve hiçbir katalog konusuyla
+ * eşleşmiyordu. Eşleşme önek üzerinden yapılır: Türkçe eklerle uzayan bir dil
+ * olduğu için "spor" hem "sporcu" hem "sportif" ile eşleşmeli.
+ */
+private val topicAliases: Map<String, Set<String>> = mapOf(
+    "teknoloji" to setOf("teknoloji", "yazılım", "kodlama", "mobil", "uygulama", "donanım"),
+    "yapay-zeka" to setOf("yapay", "zeka", "zekâ", "algoritma", "model"),
+    "sanat" to setOf("sanat", "tasarım", "arayüz", "illüstrasyon", "sergi", "tiyatro", "sinema"),
+    "egitim" to setOf("eğitim", "öğren", "ders", "kitap", "kurs", "sınav"),
+    "spor" to setOf("spor", "futbol", "basketbol", "koşu", "maç", "antrenman"),
+    "gundem" to setOf("gündem", "haber", "sondakika", "açıklama"),
+    "bilim" to setOf("bilim", "araştırma", "uzay", "fizik", "biyoloji", "deney"),
+    "oyun" to setOf("oyun", "gaming", "espor", "konsol"),
+    "muzik" to setOf("müzik", "şarkı", "albüm", "konser", "sahne"),
+    "saglik" to setOf("sağlık", "beslenme", "uyku", "diyet", "egzersiz"),
+    "girisimcilik" to setOf("girişim", "startup", "yatırım", "kariyer"),
+    "seyahat" to setOf("seyahat", "gezgin", "rota", "tatil"),
 )
 
-private fun textFeatures(text: String): Set<String> {
-    val tokens = tokenRegex.findAll(text.lowercase(turkishLocale))
-        .map { it.value.trimStart('#') }
-        .filterNot { it in stopWords }
-        .take(16)
-        .toSet()
+/**
+ * Yazarın seçtiği konular birincil kaynaktır; gönderi etiketlenmişse metinden
+ * tahmin yürütülmez. Kabul kriteri bunu gerektiriyor: konulu bir gönderi,
+ * metninde o konunun kelimeleri geçmese de doğru özelliği taşımalı. Etiket
+ * varken üstüne tahmin eklemek de yazarın beyanını sulandırırdı.
+ */
+private fun topicFeatures(slugs: List<String>, text: String?): Set<String> {
+    val declared = slugs.map { TopicCatalog.normalize(it) }.filter(TopicCatalog::isKnown)
+    if (declared.isNotEmpty()) return declared.mapTo(mutableSetOf()) { "topic:$it" }
+    if (text == null) return emptySet()
+    val tokens = tokenize(text)
     return buildSet {
-        tokens.forEach { add("token:$it") }
-        topicAliases.forEach { (topic, aliases) -> if (tokens.any { it in aliases }) add("topic:$topic") }
+        topicAliases.forEach { (slug, aliases) ->
+            if (tokens.any { token -> aliases.any(token::startsWith) }) add("topic:$slug")
+        }
     }
 }
 
+private fun textTokens(text: String): Set<String> = tokenize(text).mapTo(mutableSetOf()) { "token:$it" }
+
+private fun tokenize(text: String): Set<String> = tokenRegex.findAll(text.lowercase(turkishLocale))
+    .map { it.value.trimStart('#') }
+    .filterNot { it in stopWords }
+    .take(16)
+    .toSet()
+
+/**
+ * `lowercase` burada ROOT ile çağrılmalı: Türkçe yerel ayarında "TEKNOLOJI"
+ * noktasız `ı` ile "teknolojı" olur ve hiçbir slug'a denk gelmez.
+ */
 private fun normalizeTargetFeature(value: String): String {
-    val withoutPrefix = value.lowercase(turkishLocale).removePrefix("topic:")
+    val withoutPrefix = TopicCatalog.normalize(value).removePrefix("topic:")
     val normalized = withoutPrefix.replace(Regex("[^a-z0-9_-]"), "").take(64)
     return "topic:$normalized"
 }
 
 private fun reward(signal: RecommendationSignal): Double = when (signal.eventType) {
+    // Sunum ve gösterim tercih kanıtı değil: ikisi de kullanıcının bir şey
+    // seçtiğini göstermez, yalnızca içeriğin önüne geldiğini söyler.
     RecommendationEventType.SESSION_STARTED,
+    RecommendationEventType.FEED_SERVED,
     RecommendationEventType.CONTENT_IMPRESSION -> 0.0
     RecommendationEventType.INTEREST_SELECTED -> 2.8
     RecommendationEventType.CONTENT_VIEW -> {
@@ -232,17 +266,8 @@ private fun reward(signal: RecommendationSignal): Double = when (signal.eventTyp
 
 private fun featureLabel(key: String): String {
     val raw = key.substringAfter(':')
+    TopicCatalog.label(raw)?.let { return it }
     return when (raw) {
-        "technology" -> "Teknoloji"
-        "design" -> "Tasarım"
-        "education" -> "Eğitim"
-        "sports" -> "Spor"
-        "culture" -> "Kültür"
-        "gaming" -> "Oyun"
-        "agenda" -> "Gündem"
-        "science" -> "Bilim"
-        "local" -> "Yerel"
-        "comedy" -> "Mizah"
         "video" -> "Video"
         "image" -> "Görsel"
         "text" -> "Metin"

@@ -48,6 +48,7 @@ import com.nexi.search.JdbcSearchRepository
 import com.nexi.search.SearchService
 import com.nexi.search.searchRoutes
 import com.nexi.topics.JdbcTopicRepository
+import com.nexi.topics.TopicResolver
 import com.nexi.topics.TopicService
 import com.nexi.topics.topicRoutes
 import io.ktor.http.HttpHeaders
@@ -101,6 +102,8 @@ fun Application.module() {
     val mediaRepository = JdbcMediaRepository(dataSource)
     val recommendationRepository = JdbcRecommendationRepository(dataSource)
     val ranker = ContextualRanker()
+    // Konu kimliklerinin tek kaynağı; ilgi olaylarını kanonik slug'a çevirir.
+    val topicResolver = TopicResolver(topicRepository)
 
     // Bildirim üreten servislerden önce kurulmalı; hepsi bunu alıyor.
     val notificationRepository = JdbcNotificationRepository(dataSource)
@@ -118,6 +121,7 @@ fun Application.module() {
         repository = recommendationRepository,
         postRepository = postRepository,
         ranker = ranker,
+        topics = topicResolver,
     )
     val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage, notifications = notificationService)
     val profileRepository = JdbcProfileRepository(dataSource)

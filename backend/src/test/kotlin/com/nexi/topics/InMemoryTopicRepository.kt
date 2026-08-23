@@ -45,20 +45,12 @@ internal class InMemoryTopicRepository(
         relations.filter { it.topicId in topicIds }
 
     companion object {
-        fun defaultCatalog(): List<Topic> = listOf(
-            "teknoloji" to "Teknoloji",
-            "yapay-zeka" to "Yapay Zekâ",
-            "sanat" to "Sanat ve Tasarım",
-            "egitim" to "Eğitim",
-            "spor" to "Spor",
-            "gundem" to "Gündem",
-            "bilim" to "Bilim",
-            "oyun" to "Oyun",
-            "muzik" to "Müzik",
-            "saglik" to "Sağlık ve Yaşam",
-            "girisimcilik" to "Girişimcilik",
-            "seyahat" to "Seyahat",
-        ).mapIndexed { index, (slug, name) ->
+        /**
+         * Katalog [TopicCatalog]'dan türetilir; buradaki kimlikler
+         * `V5__create_topics.sql` ile aynı desende üretilir. Liste bir zamanlar
+         * elle kopyalanmıştı ve gerçek katalogdan sessizce ayrışabiliyordu.
+         */
+        fun defaultCatalog(): List<Topic> = TopicCatalog.LABELS.entries.mapIndexed { index, (slug, name) ->
             Topic(
                 id = UUID.fromString("00000000-0000-4000-8000-%012x".format(index + 1)),
                 slug = slug,

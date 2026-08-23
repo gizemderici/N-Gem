@@ -337,7 +337,23 @@ GET /api/v1/posts/feed?limit=20&sessionId=<uuid>&localHour=21&timezoneOffsetMinu
 GET /api/v1/posts/feed?limit=20&personalized=false
 ```
 
-İlk sayfada geçerli oturum ve saat bağlamı gönderildiğinde `nexi-contextual-v1` sıralayıcısı kullanılır. Yanıt `requestId`, `modelVersion` ve gönderi başına okunabilir `recommendationReason` alanlarını içerir. `personalized=false` olduğunda profil okunmaz, gösterim olayı yazılmaz ve kronolojik akış döner. Kişiselleştirme deposu yapılandırılmamış test/yerel bağlamlarda da kronolojik fallback korunur. Yazar e-postası akışta paylaşılmaz.
+İlk sayfada geçerli oturum ve saat bağlamı gönderildiğinde `nexi-contextual-v1` sıralayıcısı kullanılır. Yanıt `requestId`, `modelVersion` ve gönderi başına okunabilir `recommendationReason` alanlarını içerir. `personalized=false` olduğunda profil okunmaz, sunum olayı yazılmaz ve kronolojik akış döner. Kişiselleştirme deposu yapılandırılmamış test/yerel bağlamlarda da kronolojik fallback korunur. Yazar e-postası akışta paylaşılmaz.
+
+#### İki akış ucunun görev ayrımı
+
+Sistemde iki akış ucu var ve ikisi aynı şey değil. Hangisinin ne yaptığı
+belirsiz kaldığı için mobil taraf yalnızca birini çağırıyor, diğerinin okuduğu
+veri de hiç kullanılmıyordu.
+
+| Uç | Girdi | Sıralama | Durum |
+|---|---|---|---|
+| `GET /api/v1/posts/feed` | Oturum, yerel saat, `personalized` | `nexi-contextual-v1`; davranış sinyallerinden öğrenir | Mobil uygulamaların çağırdığı akış |
+| `GET /api/v1/feed` | Yalnızca imleç ve limit | Kullanıcının `user_topics` sıralamasından %70/%20/%10 katmanlı karışım | Açık tercih akışı; öğrenme yok |
+
+İkisi AI Faz 2'de tek politika altında birleşecek. O güne kadar geçerli kural:
+davranıştan öğrenen her şey `posts/feed`'e, kullanıcının kendi seçtiği konu
+sıralaması `feed`'e aittir. Yeni bir aday kaynağı ya da sıralama sinyali
+eklenecekse `posts/feed` tarafına eklenir.
 
 ### Gönderi işlemleri
 
@@ -375,7 +391,15 @@ Mobil istemciler ham dokunma koordinatı yerine anlamlı ürün olaylarını top
 }
 ```
 
-Desteklenen sinyaller oturum başlangıcı, açık ilgi seçimi, gösterim, görüntüleme/tamamlama, beğeni, kaydetme, paylaşma, gizleme, bildirme ve öneri gerekçesini açmadır. Olay kimlikleri kullanıcı bazında idempotenttir; süre, saat, gönderi sahipliği ve olay zamanı backendde doğrulanır.
+Olay adlarının ve anlamlarının bağlayıcı listesi [`docs/event-contract-v1.md`](docs/event-contract-v1.md) belgesindedir; backend, iOS ve Android o belgeye uymak zorundadır. Olay kimlikleri kullanıcı bazında idempotenttir; süre, saat, gönderi sahipliği ve olay zamanı backendde doğrulanır.
+
+İki ayrı olay karıştırılmamalı: `feed_served` backend'in gönderiyi akışa koyduğunu, `content_impression` ise gönderinin ekranda gerçekten göründüğünü söyler. Sunum kaydı yalnızca sunucu tarafından üretilir; istemciden gelirse `SERVER_ONLY_EVENT` ile reddedilir.
+
+#### Konu kimlikleri
+
+Konuların tek kaynağı [`TopicCatalog`](src/main/kotlin/com/nexi/topics/TopicCatalog.kt) ve onu tohumlayan `V5__create_topics.sql`. İlgi olaylarında `targetFeature` alanına slug (`teknoloji`) ya da konu kimliği gönderilebilir; ikisi de kanonik slug'a çevrilip öyle saklanır, katalogda olmayan değer `UNKNOWN_TOPIC_FEATURE` ile reddedilir. Sıralayıcı konu özelliğini önce gönderinin `post_topics` etiketlerinden alır; yalnızca etiketsiz gönderilerde metinden tahmin yürütür.
+
+Koddaki katalog ile migration'ın ayrışmadığını `TopicCatalogIntegrationTest` gerçek veritabanına karşı doğrular. Katalog değişecekse migration ve `TopicCatalog` birlikte değişmeli.
 
 | Yöntem | Yol | Açıklama |
 |---|---|---|

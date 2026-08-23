@@ -143,7 +143,10 @@ class PostService(
                     clientEventId = UUID.randomUUID(),
                     sessionId = context.sessionId,
                     feedRequestId = requestId,
-                    eventType = RecommendationEventType.CONTENT_IMPRESSION,
+                    // Sunum kaydı. Gerçek gösterimi istemci `content_impression`
+                    // ile bildirir; ikisini aynı tipte toplamak eğitim verisini
+                    // "gösterildi" sanılan içerikle kirletiyordu.
+                    eventType = RecommendationEventType.FEED_SERVED,
                     surface = "feed",
                     position = index,
                     dwellMillis = null,

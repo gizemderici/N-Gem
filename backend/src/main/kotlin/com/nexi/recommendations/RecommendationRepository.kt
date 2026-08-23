@@ -64,6 +64,11 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                 """SELECT re.event_type, re.post_id, re.dwell_millis, re.completion_ratio,
                           re.local_hour, re.target_feature, re.occurred_at,
                           p.owner_id, p.body,
+                          COALESCE((
+                              SELECT array_agg(t.slug ORDER BY t.display_order)
+                              FROM post_topics pt JOIN topics t ON t.id = pt.topic_id
+                              WHERE pt.post_id = p.id
+                          ), '{}') AS topic_slugs,
                           CASE
                             WHEN EXISTS (
                                 SELECT 1 FROM post_media pm JOIN media_assets m ON m.id = pm.media_id
@@ -89,6 +94,7 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                                     postId = results.getObject("post_id", UUID::class.java),
                                     authorId = results.getObject("owner_id", UUID::class.java),
                                     body = results.getString("body"),
+                                    topicSlugs = results.readTopicSlugs(),
                                     mediaType = results.getString("media_type"),
                                     dwellMillis = results.getLong("dwell_millis").let { if (results.wasNull()) null else it },
                                     completionRatio = results.getDouble("completion_ratio").let { if (results.wasNull()) null else it },
@@ -125,6 +131,20 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                 statement.executeUpdate()
             }
         }
+    }
+}
+
+/**
+ * Konusuz gönderilerde `LEFT JOIN` yüzünden dizi `NULL` gelebilir; sorgudaki
+ * `COALESCE` boş diziye çeviriyor, yine de silinmiş gönderiye bağlı olaylarda
+ * kolonun tamamı `NULL` olur.
+ */
+private fun java.sql.ResultSet.readTopicSlugs(): List<String> {
+    val array = getArray("topic_slugs") ?: return emptyList()
+    return try {
+        (array.array as? Array<*>)?.filterIsInstance<String>().orEmpty()
+    } finally {
+        array.free()
     }
 }
 

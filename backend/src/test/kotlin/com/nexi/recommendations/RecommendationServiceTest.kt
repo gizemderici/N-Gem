@@ -8,6 +8,8 @@ import com.nexi.posts.PostDetails
 import com.nexi.posts.PostRepository
 import com.nexi.posts.RankedPost
 import com.nexi.posts.RankedPostCursor
+import com.nexi.topics.InMemoryTopicRepository
+import com.nexi.topics.TopicResolver
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -24,6 +26,7 @@ class RecommendationServiceTest {
         repository,
         EmptyPostRepository,
         ContextualRanker(),
+        TopicResolver(InMemoryTopicRepository()),
         Clock.fixed(now, ZoneOffset.UTC),
     )
 
@@ -36,16 +39,55 @@ class RecommendationServiceTest {
             surface = "onboarding",
             localHour = 11,
             timezoneOffsetMinutes = 180,
-            targetFeature = "technology",
+            targetFeature = "teknoloji",
             occurredAt = now.minusSeconds(5).toString(),
         )
 
         assertEquals(1, service.append(userId, RecommendationEventBatchRequest(listOf(event))).accepted)
         assertEquals(0, service.append(userId, RecommendationEventBatchRequest(listOf(event))).accepted)
-        assertEquals("topic:technology", service.profile(userId, 11).topInterests.first().key)
+        assertEquals("topic:teknoloji", service.profile(userId, 11).topInterests.first().key)
 
         service.reset(userId)
         assertEquals(0, service.profile(userId, 11).eventCount)
+    }
+
+    @Test
+    fun `an interest outside the catalog is refused instead of stored`() {
+        // Mobil uygulamalar bir zamanlar bu İngilizce kimlikleri gönderiyordu;
+        // sessizce kabul edildikleri için hiçbir konuyla eşleşmeyen kayıtlar
+        // birikmisti. Artik istemci hatayi aninda goruyor.
+        listOf("technology", "comedy", "yok-boyle-konu").forEach { unknown ->
+            assertEquals("UNKNOWN_TOPIC_FEATURE", assertFailsWith<ApiException> {
+                service.append(userId, RecommendationEventBatchRequest(listOf(interest(unknown))))
+            }.code, "'$unknown' reddedilmeli")
+        }
+
+        assertEquals(0, service.profile(userId, 11).eventCount)
+    }
+
+    @Test
+    fun `an interest may arrive as a slug or a topic id and is stored as the slug`() {
+        val topicId = InMemoryTopicRepository().topic("oyun").id.toString()
+
+        service.append(userId, RecommendationEventBatchRequest(listOf(interest("oyun"))))
+        service.append(userId, RecommendationEventBatchRequest(listOf(interest(topicId, suffix = 2))))
+        // Buyuk harf Turkce yerel ayarinda "oyun" yerine noktasiz harf uretirdi.
+        service.append(userId, RecommendationEventBatchRequest(listOf(interest("TEKNOLOJI", suffix = 3))))
+
+        val keys = service.profile(userId, 11).topInterests.map { it.key }
+        assertEquals(setOf("topic:oyun", "topic:teknoloji"), keys.toSet())
+    }
+
+    @Test
+    fun `clients cannot forge the server side serving event`() {
+        val forged = interest("oyun").copy(
+            eventType = RecommendationEventType.FEED_SERVED,
+            postId = "00000000-0000-0000-0000-0000000000ff",
+        )
+
+        assertEquals("SERVER_ONLY_EVENT", assertFailsWith<ApiException> {
+            service.append(userId, RecommendationEventBatchRequest(listOf(forged)))
+        }.code)
     }
 
     @Test
@@ -70,6 +112,18 @@ class RecommendationServiceTest {
             )
         }.code)
     }
+
+    private fun interest(target: String, suffix: Int = 1) = RecommendationEventRequest(
+        clientEventId = "00000000-0000-0000-0000-0000000000${"%02d".format(suffix)}",
+        sessionId = "00000000-0000-0000-0000-000000000012",
+        eventType = RecommendationEventType.INTEREST_SELECTED,
+        surface = "onboarding",
+        localHour = 11,
+        timezoneOffsetMinutes = 180,
+        targetFeature = target,
+        occurredAt = now.minusSeconds(5).toString(),
+    )
+
 }
 
 private class InMemoryRecommendationRepository : RecommendationRepository {

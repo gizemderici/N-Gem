@@ -4,6 +4,7 @@ import com.nexi.auth.ApiException
 import com.nexi.auth.MessageResponse
 import com.nexi.auth.validation
 import com.nexi.posts.PostRepository
+import com.nexi.topics.TopicResolver
 import io.ktor.http.HttpStatusCode
 import java.time.Clock
 import java.time.Instant
@@ -13,6 +14,7 @@ class RecommendationService(
     private val repository: RecommendationRepository,
     private val postRepository: PostRepository,
     private val ranker: ContextualRanker,
+    private val topics: TopicResolver,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     fun append(userId: UUID, request: RecommendationEventBatchRequest): RecommendationEventBatchResponse {
@@ -65,10 +67,10 @@ class RecommendationService(
         if (request.completionRatio != null && request.completionRatio !in 0.0..1.0) throw validation("INVALID_COMPLETION", "Tamamlama oranı geçersiz.", "completionRatio")
         val surface = request.surface.trim().lowercase().take(40)
         if (surface.isBlank()) throw validation("INVALID_SURFACE", "Yüzey bilgisi gerekli.", "surface")
-        val target = request.targetFeature?.trim()?.takeIf(String::isNotBlank)?.take(80)
-        if (request.eventType == RecommendationEventType.INTEREST_SELECTED && target == null) {
-            throw validation("MISSING_TARGET_FEATURE", "İlgi seçimi olayında hedef özellik gerekli.", "targetFeature")
+        if (request.eventType == RecommendationEventType.FEED_SERVED) {
+            throw validation("SERVER_ONLY_EVENT", "Sunum olayını yalnızca backend üretir.", "eventType")
         }
+        val target = resolveTargetFeature(request)
         if (request.eventType !in setOf(RecommendationEventType.SESSION_STARTED, RecommendationEventType.INTEREST_SELECTED) && postId == null) {
             throw validation("MISSING_POST_ID", "İçerik olayında gönderi kimliği gerekli.", "postId")
         }
@@ -90,6 +92,25 @@ class RecommendationService(
             occurredAt = occurredAt,
             receivedAt = receivedAt,
         )
+    }
+
+    /**
+     * İlgi seçimi olayının hedefi kanonik konu slug'ına çevrilir.
+     *
+     * İstemci slug ya da konu kimliği gönderebilir; depoya her zaman slug
+     * yazılır, böylece mobil, backend ve çevrimdışı değerlendirici aynı kimliği
+     * görür. Tanınmayan değer 400 döner: eskiden serbest metin kabul ediliyordu
+     * ve mobildeki uyuşmayan katalog yüzünden aylarca hiçbir konuyla
+     * eşleşmeyen kayıtlar birikmişti.
+     */
+    private fun resolveTargetFeature(request: RecommendationEventRequest): String? {
+        val raw = request.targetFeature?.trim()?.takeIf(String::isNotBlank)
+        if (request.eventType != RecommendationEventType.INTEREST_SELECTED) return raw?.take(80)
+        if (raw == null) {
+            throw validation("MISSING_TARGET_FEATURE", "İlgi seçimi olayında hedef özellik gerekli.", "targetFeature")
+        }
+        return topics.canonicalSlug(raw)
+            ?: throw validation("UNKNOWN_TOPIC_FEATURE", "İlgi alanı katalogda yok.", "targetFeature")
     }
 }
 
