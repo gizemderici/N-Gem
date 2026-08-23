@@ -4,6 +4,16 @@ plugins {
     id("io.ktor.plugin") version "3.5.2"
 }
 
+val integrationTest by sourceSets.creating {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += output + compileClasspath
+}
+
+configurations[integrationTest.implementationConfigurationName]
+    .extendsFrom(configurations.testImplementation.get())
+configurations[integrationTest.runtimeOnlyConfigurationName]
+    .extendsFrom(configurations.testRuntimeOnly.get())
+
 group = "com.nexi"
 version = "0.1.0"
 
@@ -37,6 +47,10 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host")
+
+    add(integrationTest.implementationConfigurationName, platform("org.testcontainers:testcontainers-bom:2.0.5"))
+    add(integrationTest.implementationConfigurationName, "org.testcontainers:testcontainers-junit-jupiter")
+    add(integrationTest.implementationConfigurationName, "org.testcontainers:testcontainers-postgresql")
 }
 
 kotlin {
@@ -45,4 +59,13 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs PostgreSQL integration and concurrency tests with Testcontainers."
+    group = "verification"
+    testClassesDirs = integrationTest.output.classesDirs
+    classpath = integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter(tasks.test)
 }

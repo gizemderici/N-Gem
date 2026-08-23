@@ -45,6 +45,19 @@ Testler:
 .\gradlew.bat clean test
 ```
 
+Gerçek PostgreSQL 17 üzerinde migration ve yarış koşulu testleri Docker gerektirir.
+Bu testler normal birim testlerinden ayrı tutulur:
+
+```powershell
+.\gradlew.bat integrationTest --no-daemon
+```
+
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V14`
+migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
+konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
+senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her
+gönderimde hem birim testlerini hem bu entegrasyon testlerini otomatik çalıştırır.
+
 JDK kurulu değilse testler Docker üzerinden de koşturulabilir. Kalıcı bir Gradle
 önbelleği bağlamak süreyi 10 dakikadan ~1 dakikaya indirir:
 
