@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: nexi
       POSTGRES_PASSWORD: nexi_dev_password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - nexi_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,12 +23,12 @@ services:
       DATABASE_URL: jdbc:postgresql://postgres:5432/nexi
       DATABASE_USER: nexi
       DATABASE_PASSWORD: nexi_dev_password
-      JWT_SECRET: local-development-secret-change-before-production
+      JWT_SECRET: ${JWT_SECRET:-nexi-local-demo-secret-change-before-sharing-2026}
       JWT_ISSUER: nexi-backend
       JWT_AUDIENCE: nexi-mobile
       EXPOSE_DEVELOPMENT_CODES: "true"
       STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
       STORAGE_REGION: us-east-1
       STORAGE_ACCESS_KEY: nexi
       STORAGE_SECRET_KEY: nexi_dev_storage_password
@@ -36,7 +36,13 @@ services:
       MAX_IMAGE_SIZE_BYTES: 10485760
       MAX_VIDEO_SIZE_BYTES: 26214400
     ports:
-      - "8080:8080"
+      - "${DEMO_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,14 +50,14 @@ services:
         condition: service_healthy
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: nexi
       MINIO_ROOT_PASSWORD: nexi_dev_storage_password
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${DEMO_BIND_ADDRESS:-127.0.0.1}:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - nexi_minio_data:/data
     healthcheck:

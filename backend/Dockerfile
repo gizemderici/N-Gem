@@ -7,6 +7,9 @@ RUN --mount=type=cache,target=/home/gradle/.gradle \
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/build/install/nexi-backend/ ./
 EXPOSE 8080
 ENTRYPOINT ["./bin/nexi-backend"]

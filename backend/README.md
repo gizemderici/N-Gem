@@ -291,15 +291,29 @@ Hazır duruma gelen medya dosyaları `mediaId` ile bir gönderiye bağlanır. Bi
 
 Metin 2000 karakterle, medya dosyaları dört adetle sınırlıdır. Metin veya en az bir medya zorunludur.
 
-## Görsel ve videolu demo verisi
+## Yerel demo ortamı ve örnek veri
 
-Backend, PostgreSQL ve MinIO çalışırken özgün demo varlıklarını gerçek API üzerinden yüklemek için:
+Ücretli servis gerektirmeyen demo; backend, PostgreSQL ve MinIO'yu Docker Compose ile çalıştırır. PowerShell'de tek komut sistemi kurar, sağlık kontrolünü bekler ve kurgu veriyi gerçek API üzerinden ekler:
 
-```bash
-python3 seed/seed_demo.py
+```powershell
+.\scripts\demo.ps1
 ```
 
-Araç altı doğrulanmış demo hesap oluşturur, `seed/assets` altındaki dört JPEG ve iki MP4 dosyasını süreli yükleme adresleriyle MinIO'ya gönderir, örnek gönderi ve etkileşimleri ekler. Aynı içerikleri ikinci kez oluşturmaz. Sonunda iş saati ve akşam bağlamı için kişiselleştirilmiş ilk beş sonucu yazdırır.
+Betik sekiz doğrulanmış hesap; biyografi, avatar ve ilgi alanları; 30 Türkçe gönderi; görsel ve kısa videolar; takip, beğeni, kaydetme ve yorumlar; aktif hikâyeler; mesaj konuşmaları; bildirim üreten etkileşimler ile kurgu engelleme/şikâyet örnekleri hazırlar. Seed tekrar çalıştırılabilir; aynı gönderi, yorum, mesaj, aktif hikâye veya rapor çoğaltılmaz.
+
+Demo verilerini tamamen silip temiz kurulum yapmak için açık onay gerekir:
+
+```powershell
+.\scripts\demo.ps1 -ResetData -ConfirmReset
+```
+
+Bu komut yalnızca bu Compose projesinin PostgreSQL ve MinIO volume'lerini siler. Gerçek veya saklanması gereken veri bulunan bir ortamda kullanılmamalıdır.
+
+Docker zaten çalışıyorsa seed tek başına da çalıştırılabilir:
+
+```powershell
+python seed\seed_demo.py
+```
 
 Mobil uygulamada deneme hesabı:
 
@@ -309,6 +323,10 @@ E-posta: demo.deneme@nsosyal.local
 ```
 
 Demo varlıklarının üretim özeti ve prompt seti `seed/PROMPTS.md` dosyasındadır.
+
+Varsayılan durumda backend ve MinIO yalnızca `127.0.0.1` üzerinden erişilir. Fiziksel telefondan demo için `.env.example` dosyasını `.env` adıyla kopyalayıp `DEMO_BIND_ADDRESS=0.0.0.0` ve `STORAGE_PUBLIC_ENDPOINT=http://<bilgisayarin-LAN-IP-adresi>:9000` ayarlanmalıdır. Mobil uygulamanın backend adresi de `http://<bilgisayarin-LAN-IP-adresi>:8080` olmalıdır. PostgreSQL ve MinIO yönetim konsolu yine yalnızca yerel makinede kalır.
+
+Bu yapılandırma geliştirme doğrulama kodlarını API yanıtında gösterir ve yalnızca yerel demo içindir; internete açık production ortamı olarak kullanılmamalıdır. MinIO imajı tekrarlanabilir kurulum için sabit sürüme bağlanmıştır.
 
 ### Sayfalı akış
 
