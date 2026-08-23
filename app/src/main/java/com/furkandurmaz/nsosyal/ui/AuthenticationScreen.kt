@@ -29,14 +29,19 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.furkandurmaz.nsosyal.AppState
+import com.furkandurmaz.nsosyal.DataSourceMode
+import com.furkandurmaz.nsosyal.network.BackendApiException
 import com.furkandurmaz.nsosyal.ui.components.*
 import com.furkandurmaz.nsosyal.ui.theme.*
+import kotlinx.coroutines.launch
 
 private enum class AuthPage { WELCOME, SIGN_IN, SIGN_UP, FORGOT, VERIFY, RESET }
 private enum class VerificationPurpose { ACCOUNT, PASSWORD }
 
 @Composable
-fun AuthenticationScreen(onAuthenticated: () -> Unit) {
+fun AuthenticationScreen(state: AppState, onAuthenticated: () -> Unit) {
+    val scope = rememberCoroutineScope()
     var page by remember { mutableStateOf(AuthPage.WELCOME) }
     var purpose by remember { mutableStateOf(VerificationPurpose.ACCOUNT) }
     var fullName by remember { mutableStateOf("") }
@@ -48,10 +53,42 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
     var acceptsTerms by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
     var feedbackIsError by remember { mutableStateOf(true) }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    fun submit(action: suspend () -> Unit) {
+        if (isSubmitting) return
+        feedback = null
+        scope.launch {
+            isSubmitting = true
+            try {
+                action()
+            } catch (error: Exception) {
+                feedback = (error as? BackendApiException)?.message
+                    ?: error.message
+                    ?: "İşlem tamamlanamadı. Lütfen yeniden dene."
+                feedbackIsError = true
+            } finally {
+                isSubmitting = false
+            }
+        }
+    }
 
     fun go(target: AuthPage) {
         feedback = null
         page = target
+    }
+
+    fun socialSignIn() {
+        if (state.dataSourceMode == DataSourceMode.BACKEND) {
+            go(AuthPage.SIGN_IN)
+            feedback = "Google ile giriş backend tarafından henüz desteklenmiyor. E-posta ile devam edebilirsin."
+            feedbackIsError = false
+            return
+        }
+        submit {
+            state.mockSocialSignIn()
+            onAuthenticated()
+        }
     }
 
     fun back() {
@@ -98,7 +135,7 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
                 AuthPage.WELCOME -> AuthWelcome(
                     onSignUp = { go(AuthPage.SIGN_UP) },
                     onSignIn = { go(AuthPage.SIGN_IN) },
-                    onGoogle = onAuthenticated
+                    onGoogle = ::socialSignIn
                 )
 
                 AuthPage.SIGN_IN -> AuthFormPage(onBack = ::back) {
@@ -119,11 +156,14 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
                                 feedback = "Şifren en az 6 karakter olmalı."
                                 feedbackIsError = true
                             }
-                            else -> onAuthenticated()
+                            else -> submit {
+                                state.signIn(email, password)
+                                onAuthenticated()
+                            }
                         }
                     })
                     AuthDivider()
-                    SocialButton("G", "Google ile devam et", onAuthenticated)
+                    SocialButton("G", "Google ile devam et", ::socialSignIn)
                     SwitchPrompt("Henüz hesabın yok mu?", "Hesap oluştur") { go(AuthPage.SIGN_UP) }
                 }
 
@@ -155,9 +195,16 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
                             password.length < 8 -> feedback = "Şifren en az 8 karakter olmalı."
                             !acceptsTerms -> feedback = "Devam etmek için koşulları kabul etmelisin."
                             else -> {
-                                purpose = VerificationPurpose.ACCOUNT
-                                code = ""
-                                go(AuthPage.VERIFY)
+                                submit {
+                                    val developmentCode = state.register(fullName, username, email, password)
+                                    purpose = VerificationPurpose.ACCOUNT
+                                    code = developmentCode.orEmpty()
+                                    go(AuthPage.VERIFY)
+                                    if (developmentCode != null) {
+                                        feedback = "Geliştirme doğrulama kodu otomatik dolduruldu."
+                                        feedbackIsError = false
+                                    }
+                                }
                             }
                         }
                         feedbackIsError = true
@@ -175,9 +222,16 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
                             feedback = "Hesabına bağlı geçerli e-posta adresini yazmalısın."
                             feedbackIsError = true
                         } else {
-                            purpose = VerificationPurpose.PASSWORD
-                            code = ""
-                            go(AuthPage.VERIFY)
+                            submit {
+                                val developmentCode = state.forgotPassword(email)
+                                purpose = VerificationPurpose.PASSWORD
+                                code = developmentCode.orEmpty()
+                                go(AuthPage.VERIFY)
+                                if (developmentCode != null) {
+                                    feedback = "Geliştirme doğrulama kodu otomatik dolduruldu."
+                                    feedbackIsError = false
+                                }
+                            }
                         }
                     })
                 }
@@ -190,16 +244,26 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
                     }, KeyboardType.Number)
                     Feedback(feedback, feedbackIsError)
                     PrimaryButton("Kodu doğrula", enabled = code.length == 6, onClick = {
-                        if (purpose == VerificationPurpose.ACCOUNT) onAuthenticated()
-                        else {
+                        if (purpose == VerificationPurpose.ACCOUNT) submit {
+                            state.verifyEmail(email, code)
+                            onAuthenticated()
+                        } else {
                             password = ""
                             repeatedPassword = ""
                             go(AuthPage.RESET)
                         }
                     })
                     SwitchPrompt("Kod gelmedi mi?", "Tekrar gönder") {
-                        feedback = "Yeni doğrulama kodu gönderildi."
-                        feedbackIsError = false
+                        submit {
+                            val developmentCode = if (purpose == VerificationPurpose.ACCOUNT) {
+                                state.resendVerification(email)
+                            } else {
+                                state.forgotPassword(email)
+                            }
+                            if (developmentCode != null) code = developmentCode
+                            feedback = "Yeni doğrulama kodu gönderildi."
+                            feedbackIsError = false
+                        }
                     }
                 }
 
@@ -215,11 +279,14 @@ fun AuthenticationScreen(onAuthenticated: () -> Unit) {
                             password.length < 8 -> feedback = "Yeni şifren en az 8 karakter olmalı."
                             password != repeatedPassword -> feedback = "Yazdığın şifreler birbiriyle eşleşmiyor."
                             else -> {
-                                password = ""
-                                repeatedPassword = ""
-                                go(AuthPage.SIGN_IN)
-                                feedback = "Şifren yenilendi. Yeni şifrenle giriş yapabilirsin."
-                                feedbackIsError = false
+                                submit {
+                                    state.resetPassword(email, code, password)
+                                    password = ""
+                                    repeatedPassword = ""
+                                    go(AuthPage.SIGN_IN)
+                                    feedback = "Şifren yenilendi. Yeni şifrenle giriş yapabilirsin."
+                                    feedbackIsError = false
+                                }
                             }
                         }
                     })

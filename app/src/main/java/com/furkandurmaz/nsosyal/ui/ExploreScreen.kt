@@ -18,7 +18,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.furkandurmaz.nsosyal.AppState
-import com.furkandurmaz.nsosyal.data.MockSocialData
 import com.furkandurmaz.nsosyal.model.SocialPost
 import com.furkandurmaz.nsosyal.ui.components.*
 import com.furkandurmaz.nsosyal.ui.theme.*
@@ -30,7 +29,7 @@ fun ExploreScreen(state: AppState) {
     var selectedTopic by remember { mutableStateOf("Tümü") }
     var showFilters by remember { mutableStateOf(false) }
     val topics = listOf("Tümü", "Teknoloji", "Tasarım", "Yerel", "Mizah", "Eğitim")
-    val filtered = MockSocialData.posts.filter {
+    val filtered = state.posts.filter {
         (selectedTopic == "Tümü" || it.topic == selectedTopic) &&
             (query.isBlank() || it.body.contains(query, true) || it.creator.name.contains(query, true) || it.topic.contains(query, true))
     }
@@ -158,7 +157,7 @@ private fun CommunityCard(title: String, detail: String, glyph: String, color: C
 
 @Composable
 private fun ExploreTile(post: SocialPost, state: AppState, modifier: Modifier) {
-    Pressable(onClick = { state.selectedReasonPost = post }, modifier = modifier) {
+    Pressable(onClick = { state.openReason(post) }, modifier = modifier) {
         if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) {
             MediaArtwork(post.artwork, post.artworkTitle, post.artworkSubtitle, compact = true, isVideo = post.isVideo, videoLength = post.videoLength)
         } else {

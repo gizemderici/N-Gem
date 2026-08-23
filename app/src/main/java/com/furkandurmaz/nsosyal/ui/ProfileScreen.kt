@@ -38,7 +38,7 @@ fun ProfileScreen(state: AppState, onLogout: () -> Unit) {
         item { PrivacyCard(Modifier.padding(horizontal = 18.dp)) { showSettings = true } }
         item { StatsRow() }
         item { ProfileSectionPicker(selectedSection) { selectedSection = it } }
-        val posts = if (selectedSection == "Kaydedilenler") MockSocialData.posts.filter { it.id in state.savedPostIds } else MockSocialData.posts
+        val posts = if (selectedSection == "Kaydedilenler") state.posts.filter { it.id in state.savedPostIds } else state.posts
         if (posts.isEmpty()) {
             item { SurfaceCard(Modifier.padding(horizontal = 18.dp).fillMaxWidth()) { Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("▯", color = Blue, fontSize = 28.sp); Text("Henüz kayıt yok", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold); Text("Kaydettiğin içerikler burada görünecek.", color = MutedInk, fontSize = 13.sp) } } }
         } else {
@@ -68,10 +68,10 @@ private fun ProfileHero(state: AppState, onSettings: () -> Unit) {
             RoundIconButton("↗", "Profili paylaş", { state.showToast("Profil bağlantısı hazır") })
             RoundIconButton("⚙", "Ayarlar", onSettings)
         }
-        Box(Modifier.size(102.dp).align(Alignment.TopCenter).offset(y = 116.dp).background(Canvas, CircleShape).padding(5.dp), contentAlignment = Alignment.Center) { Avatar(MockSocialData.currentUser, 92.dp) }
+        Box(Modifier.size(102.dp).align(Alignment.TopCenter).offset(y = 116.dp).background(Canvas, CircleShape).padding(5.dp), contentAlignment = Alignment.Center) { Avatar(state.currentCreator, 92.dp) }
         Column(Modifier.align(Alignment.BottomCenter).padding(horizontal = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Furkan Durmaz", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("@furkandurmaz", color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text(state.displayName, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text(state.displayUsername, color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(4.dp))
             Text("Dijital ürünler, sade deneyimler ve Türkiye’den çıkan iyi fikirler üzerine düşünüyorum.", color = Ink, fontSize = 13.sp, lineHeight = 18.sp, textAlign = TextAlign.Center)
             Text("⌖ İstanbul     ◷ Ağu 2026", color = MutedInk, fontSize = 10.sp)
@@ -122,7 +122,7 @@ private fun ProfileSectionPicker(selected: String, onSelected: (String) -> Unit)
 
 @Composable
 private fun ProfileTile(post: SocialPost, state: AppState, modifier: Modifier) {
-    Pressable(onClick = { state.selectedReasonPost = post }, modifier = modifier) {
+    Pressable(onClick = { state.openReason(post) }, modifier = modifier) {
         if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) MediaArtwork(post.artwork, post.artworkTitle, post.artworkSubtitle, compact = true, isVideo = post.isVideo, videoLength = post.videoLength)
         else Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Brush.linearGradient(post.creator.colors), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) { Text("“", color = Color.White.copy(alpha = .85f), fontSize = 32.sp, fontWeight = FontWeight.Bold) }
     }
@@ -130,7 +130,6 @@ private fun ProfileTile(post: SocialPost, state: AppState, modifier: Modifier) {
 
 @Composable
 private fun SettingsContent(state: AppState, onLogout: () -> Unit, onDismiss: () -> Unit) {
-    var personalization by remember { mutableStateOf(true) }
     var activityNotifications by remember { mutableStateOf(true) }
     var recommendationNotifications by remember { mutableStateOf(false) }
     var showLogout by remember { mutableStateOf(false) }
@@ -167,7 +166,7 @@ private fun SettingsContent(state: AppState, onLogout: () -> Unit, onDismiss: ()
             }
         }
         item { SettingsSection("BAĞLAMSAL TERCİHLER") { Column { ContextRow("☀", Amber, "Mesai saatleri", "Teknoloji • Eğitim"); HorizontalDivider(color = Border); ContextRow("☾", Violet, "Akşam", "Mizah • Uzun video"); HorizontalDivider(color = Border); ContextRow("◷", Green, "Hafta sonu", "Yerel • Kültür") } } }
-        item { SettingsSection("KONTROLLER") { Column { SettingToggle("Akıllı kişiselleştirme", "Uygulama içindeki davranışlarını akışı iyileştirmek için kullanır.", personalization) { personalization = it }; HorizontalDivider(color = Border); SettingToggle("Etkileşim bildirimleri", "Yanıt, takip ve topluluk gelişmeleri.", activityNotifications) { activityNotifications = it }; HorizontalDivider(color = Border); SettingToggle("Öneri bildirimleri", "Sana uygun yeni içerik önerileri.", recommendationNotifications) { recommendationNotifications = it } } } }
+        item { SettingsSection("KONTROLLER") { Column { SettingToggle("Akıllı kişiselleştirme", "Uygulama içindeki davranışlarını akışı iyileştirmek için kullanır.", state.personalizationEnabled) { state.updatePersonalizationEnabled(it) }; HorizontalDivider(color = Border); SettingToggle("Etkileşim bildirimleri", "Yanıt, takip ve topluluk gelişmeleri.", activityNotifications) { activityNotifications = it }; HorizontalDivider(color = Border); SettingToggle("Öneri bildirimleri", "Sana uygun yeni içerik önerileri.", recommendationNotifications) { recommendationNotifications = it } } } }
         item { SettingsSection("VERİLERİN") { Column { SettingsAction("▤", "Kişiselleştirme profilini görüntüle", Blue) { state.showToast("Profil açıldı") }; HorizontalDivider(color = Border); SettingsAction("⇩", "Verilerimi dışa aktar", Blue) { state.showToast("Dışa aktarma hazırlanıyor") }; HorizontalDivider(color = Border); SettingsAction("↻", "Öğrenilmiş modeli sıfırla", Coral) { state.resetLearnedProfile() } } } }
         item { SettingsSection("HESAP") { SettingsAction("↪", "Hesaptan çıkış yap", Coral) { showLogout = true } } }
         item { Text("Kamera, özel mesaj içerikleri, kişi listesi ve kesin konum kişiselleştirme için varsayılan olarak toplanmaz.", color = MutedInk, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.fillMaxWidth().background(ElevatedSurface, RoundedCornerShape(16.dp)).padding(15.dp)) }

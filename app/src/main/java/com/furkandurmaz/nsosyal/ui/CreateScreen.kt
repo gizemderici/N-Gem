@@ -18,7 +18,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.furkandurmaz.nsosyal.AppState
-import com.furkandurmaz.nsosyal.data.MockSocialData
 import com.furkandurmaz.nsosyal.ui.components.*
 import com.furkandurmaz.nsosyal.ui.theme.*
 
@@ -50,8 +49,8 @@ fun CreateScreen(state: AppState) {
             SurfaceCard(Modifier.fillMaxWidth(), 24.dp, true) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                        Avatar(MockSocialData.currentUser, 44.dp)
-                        Column { Text("Furkan Durmaz", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold); Text("@furkandurmaz", color = MutedInk, fontSize = 11.sp) }
+                        Avatar(state.currentCreator, 44.dp)
+                        Column { Text(state.displayName, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold); Text(state.displayUsername, color = MutedInk, fontSize = 11.sp) }
                     }
                     OutlinedTextField(
                         value = text,

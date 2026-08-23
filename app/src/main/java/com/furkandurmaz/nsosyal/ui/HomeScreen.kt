@@ -95,7 +95,7 @@ private fun HomeHeader(state: AppState, modifier: Modifier = Modifier) {
         Column(Modifier.weight(1f)) {
             Text("NSosyal", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             val hour = LocalTime.now().hour
-            Text(when (hour) { in 5..11 -> "Günaydın, Furkan"; in 12..17 -> "İyi günler, Furkan"; else -> "İyi akşamlar, Furkan" }, color = MutedInk, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(when (hour) { in 5..11 -> "Günaydın, ${state.firstName}"; in 12..17 -> "İyi günler, ${state.firstName}"; else -> "İyi akşamlar, ${state.firstName}" }, color = MutedInk, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
         RoundIconButton("✉", "Mesajlar", { state.showToast("Mesajlar yakında burada") })
     }
@@ -149,6 +149,11 @@ private fun PostCard(post: SocialPost, state: AppState) {
     val saved = post.id in state.savedPostIds
     val following = post.creator.id in state.followedCreatorIds
 
+    DisposableEffect(post.id) {
+        state.beginViewing(post)
+        onDispose { state.endViewing(post) }
+    }
+
     SurfaceCard(Modifier.fillMaxWidth(), 24.dp) {
         Column {
             Row(Modifier.padding(horizontal = 15.dp).padding(top = 15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -165,15 +170,17 @@ private fun PostCard(post: SocialPost, state: AppState) {
                         Text("Takip", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                Pressable(onClick = { state.selectedReasonPost = post }, modifier = Modifier.size(30.dp)) {
+                Pressable(onClick = { state.openReason(post) }, modifier = Modifier.size(30.dp)) {
                     Text("•••", color = MutedInk, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
                 }
             }
             Text(post.body, color = Ink, fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(horizontal = 15.dp).padding(top = 13.dp))
-            if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) {
+            if (post.mediaUrl != null && post.mediaMimeType != null) {
+                RemotePostMedia(post.mediaUrl, post.mediaMimeType, Modifier.padding(horizontal = 9.dp, vertical = 15.dp))
+            } else if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) {
                 MediaArtwork(post.artwork, post.artworkTitle, post.artworkSubtitle, Modifier.padding(horizontal = 9.dp, vertical = 15.dp), post.isVideo, post.videoLength)
             }
-            Pressable(onClick = { state.selectedReasonPost = post }, modifier = Modifier.padding(horizontal = 15.dp).background(Blue.copy(alpha = 0.07f), CircleShape).padding(horizontal = 10.dp, vertical = 7.dp)) {
+            Pressable(onClick = { state.openReason(post) }, modifier = Modifier.padding(horizontal = 15.dp).background(Blue.copy(alpha = 0.07f), CircleShape).padding(horizontal = 10.dp, vertical = 7.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("✦", color = Blue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Text(post.reason, color = MutedInk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
@@ -184,7 +191,7 @@ private fun PostCard(post: SocialPost, state: AppState) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 PostAction(if (liked) "♥" else "♡", compactNumber(post.likeCount + if (liked) 1 else 0), if (liked) Coral else MutedInk) { state.toggleLike(post) }
                 PostAction("□", compactNumber(post.commentCount), MutedInk) { state.showToast("Yorumlar yakında") }
-                PostAction("↗", compactNumber(post.shareCount), MutedInk) { state.showToast("Paylaşım bağlantısı hazır") }
+                PostAction("↗", compactNumber(post.shareCount), MutedInk) { state.share(post) }
                 PostAction(if (saved) "▮" else "▯", "", if (saved) Blue else MutedInk) { state.toggleSave(post) }
             }
         }
@@ -214,7 +221,7 @@ internal fun RecommendationReasonContent(post: SocialPost, state: AppState, onDi
         }
         Text("Kontrol sende", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         ReasonAction("⌄", "Bu konuyu daha az göster", Coral) { state.hide(post); onDismiss() }
-        ReasonAction("◷", "Bu saatte gösterme", Amber) { state.showToast("Saat tercihin güncellendi"); onDismiss() }
+        ReasonAction("◷", "Bu saatte gösterme", Amber) { state.avoidAtCurrentTime(post); onDismiss() }
         Text("Saat bilgisi ve içerikte kalma süresi tek başına karar vermez; açık tercihlerin her zaman daha güçlü sinyaldir.", color = MutedInk, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp)).border(1.dp, Border, RoundedCornerShape(18.dp)).padding(16.dp))
         Spacer(Modifier.navigationBarsPadding())
     }

@@ -1,9 +1,13 @@
 package com.furkandurmaz.nsosyal.ui.components
 
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.widget.VideoView
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,6 +16,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +28,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -31,9 +37,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.furkandurmaz.nsosyal.model.ArtworkStyle
 import com.furkandurmaz.nsosyal.model.Creator
 import com.furkandurmaz.nsosyal.ui.theme.*
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun Pressable(
@@ -297,6 +308,87 @@ fun MediaArtwork(
                     Text(it, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun RemotePostMedia(
+    urlString: String,
+    mimeType: String,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(22.dp)
+    var failed by remember(urlString) { mutableStateOf(false) }
+    var image by remember(urlString) { mutableStateOf<ImageBitmap?>(null) }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(0.8f)
+            .clip(shape)
+            .background(ElevatedSurface)
+            .border(1.dp, Border, shape),
+        contentAlignment = Alignment.Center
+    ) {
+        if (mimeType.startsWith("video/")) {
+            key(urlString) {
+                AndroidView(
+                    factory = { context ->
+                        VideoView(context).apply {
+                            setVideoURI(Uri.parse(urlString))
+                            setOnPreparedListener { mediaPlayer ->
+                                mediaPlayer.isLooping = true
+                                mediaPlayer.setVolume(0f, 0f)
+                                start()
+                            }
+                            setOnErrorListener { _, _, _ ->
+                                failed = true
+                                true
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize().background(Color.Black),
+                    onRelease = VideoView::stopPlayback
+                )
+            }
+        } else {
+            LaunchedEffect(urlString) {
+                image = withContext(Dispatchers.IO) {
+                    val connection = URL(urlString).openConnection() as HttpURLConnection
+                    try {
+                        connection.connectTimeout = 8_000
+                        connection.readTimeout = 15_000
+                        connection.setRequestProperty("Accept", "image/*")
+                        if (connection.responseCode in 200..299) {
+                            connection.inputStream.use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+                        } else null
+                    } catch (_: Exception) {
+                        null
+                    } finally {
+                        connection.disconnect()
+                    }
+                }
+                failed = image == null
+            }
+
+            image?.let {
+                Image(
+                    bitmap = it,
+                    contentDescription = "Gönderi görseli",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        if (failed) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (mimeType.startsWith("video/")) "▶" else "▧", color = MutedInk, fontSize = 28.sp)
+                Text("Medya açılamadı", color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else if (!mimeType.startsWith("video/") && image == null) {
+            CircularProgressIndicator(color = Blue, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
         }
     }
 }

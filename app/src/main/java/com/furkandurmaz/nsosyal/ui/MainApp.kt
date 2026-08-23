@@ -27,6 +27,10 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainApp(state: AppState, onLogout: () -> Unit) {
+    LaunchedEffect(Unit) {
+        state.refreshFeed()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()

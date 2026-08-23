@@ -50,7 +50,9 @@ data class SocialPost(
     val reasonDetail: String,
     val likeCount: Int,
     val commentCount: Int,
-    val shareCount: Int
+    val shareCount: Int,
+    val mediaUrl: String? = null,
+    val mediaMimeType: String? = null
 )
 
 data class SocialStory(
