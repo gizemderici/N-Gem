@@ -1,4 +1,91 @@
+import AVKit
 import SwiftUI
+
+struct RemotePostMedia: View {
+    let urlString: String
+    let mimeType: String
+
+    @State private var player: AVPlayer?
+
+    private var url: URL? { URL(string: urlString) }
+    private var isVideo: Bool { mimeType.hasPrefix("video/") }
+
+    var body: some View {
+        Group {
+            if isVideo {
+                video
+            } else if let url {
+                AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 0.25))) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        mediaFallback(icon: "photo.badge.exclamationmark", text: "Görsel açılamadı")
+                    default:
+                        ZStack {
+                            Color.black.opacity(0.04)
+                            ProgressView().tint(NSTheme.blue)
+                        }
+                    }
+                }
+            } else {
+                mediaFallback(icon: "link.badge.plus", text: "Medya adresi geçersiz")
+            }
+        }
+        .aspectRatio(4 / 5, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .background(NSTheme.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(NSTheme.border, lineWidth: 1)
+        }
+        .clipped()
+        .accessibilityLabel(isVideo ? "Video gönderisi" : "Görsel gönderisi")
+    }
+
+    @ViewBuilder
+    private var video: some View {
+        if let url {
+            ZStack {
+                Color.black
+                VideoPlayer(player: player)
+            }
+            .onAppear {
+                guard player == nil else { return }
+                let newPlayer = AVPlayer(url: url)
+                newPlayer.isMuted = true
+                player = newPlayer
+                newPlayer.play()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+                guard notification.object as AnyObject? === player?.currentItem else { return }
+                player?.seek(to: .zero)
+                player?.play()
+            }
+            .onDisappear {
+                player?.pause()
+                player = nil
+            }
+        } else {
+            mediaFallback(icon: "video.badge.exclamationmark", text: "Video açılamadı")
+        }
+    }
+
+    private func mediaFallback(icon: String, text: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .semibold))
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(NSTheme.mutedInk)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(NSTheme.elevatedSurface)
+    }
+}
 
 struct MediaArtwork: View {
     let style: ArtworkStyle

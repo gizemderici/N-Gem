@@ -110,6 +110,8 @@ struct SocialPost: Identifiable, Hashable {
     var likeCount: Int
     var commentCount: Int
     var shareCount: Int
+    var mediaURL: String? = nil
+    var mediaMimeType: String? = nil
 }
 
 struct SocialStory: Identifiable, Hashable {
@@ -159,11 +161,15 @@ struct SocialNotification: Identifiable, Hashable {
 
 enum FeedEventName: String {
     case sessionStarted = "session_started"
+    case interestSelected = "interest_selected"
     case contentImpression = "content_impression"
+    case contentViewed = "content_view"
+    case contentCompleted = "content_complete"
     case contentLiked = "content_liked"
     case contentSaved = "content_saved"
     case contentShared = "content_shared"
     case contentHidden = "content_hidden"
+    case contentReported = "content_reported"
     case reasonOpened = "recommendation_reason_opened"
     case postPublished = "post_published"
 }

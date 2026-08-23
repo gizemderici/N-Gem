@@ -5,7 +5,6 @@ struct PersonalizationSettingsView: View {
     @EnvironmentObject private var authenticationStore: AuthenticationStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var personalizationEnabled = true
     @State private var activityNotifications = true
     @State private var recommendationNotifications = false
     @State private var showsInterestFilter = false
@@ -30,7 +29,14 @@ struct PersonalizationSettingsView: View {
                     }
 
                     settingsSection(title: "Kontroller") {
-                        settingToggle(title: "Akıllı kişiselleştirme", subtitle: "Uygulama içindeki davranışlarını akışı iyileştirmek için kullanır.", isOn: $personalizationEnabled)
+                        settingToggle(
+                            title: "Akıllı kişiselleştirme",
+                            subtitle: "Uygulama içindeki davranışlarını akışı iyileştirmek için kullanır.",
+                            isOn: Binding(
+                                get: { store.personalizationEnabled },
+                                set: { store.setPersonalizationEnabled($0) }
+                            )
+                        )
                         Divider().overlay(NSTheme.border)
                         settingToggle(title: "Etkileşim bildirimleri", subtitle: "Yanıt, takip ve topluluk gelişmeleri.", isOn: $activityNotifications)
                         Divider().overlay(NSTheme.border)

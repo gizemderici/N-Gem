@@ -22,7 +22,12 @@ struct PostCard: View {
                 .padding(.horizontal, 15)
                 .padding(.top, 13)
 
-            if let artwork = post.artwork,
+            if let mediaURL = post.mediaURL,
+               let mediaMimeType = post.mediaMimeType {
+                RemotePostMedia(urlString: mediaURL, mimeType: mediaMimeType)
+                    .padding(.horizontal, 9)
+                    .padding(.top, 15)
+            } else if let artwork = post.artwork,
                let title = post.artworkTitle,
                let subtitle = post.artworkSubtitle {
                 MediaArtwork(
@@ -49,6 +54,8 @@ struct PostCard: View {
                 .padding(.vertical, 10)
         }
         .surfaceCard(radius: 24, shadow: false)
+        .onAppear { store.beginViewing(post) }
+        .onDisappear { store.endViewing(post) }
     }
 
     private var postHeader: some View {
@@ -99,7 +106,9 @@ struct PostCard: View {
                 Button("Daha az göster", systemImage: "hand.thumbsdown") {
                     store.hide(post)
                 }
-                Button("Gönderiyi bildir", systemImage: "exclamationmark.bubble", role: .destructive) {}
+                Button("Gönderiyi bildir", systemImage: "exclamationmark.bubble", role: .destructive) {
+                    store.report(post)
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 16, weight: .semibold))
@@ -163,7 +172,7 @@ struct PostCard: View {
                 color: NSTheme.mutedInk,
                 label: "Paylaş"
             ) {
-                store.showToast("Paylaşım bağlantısı hazır")
+                store.share(post)
             }
 
             Spacer()
@@ -264,7 +273,7 @@ struct RecommendationReasonSheet: View {
                         }
 
                         controlButton(icon: "clock", title: "Bu saatte gösterme", color: NSTheme.amber) {
-                            store.showToast("Saat tercihin güncellendi")
+                            store.avoidAtCurrentTime(post)
                             dismiss()
                         }
 

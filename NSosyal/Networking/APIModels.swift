@@ -1,5 +1,16 @@
 import Foundation
 
+enum DataSourceMode: Equatable {
+    case checking
+    case backend
+    case mock
+}
+
+struct HealthResponse: Decodable {
+    let status: String
+    let service: String
+}
+
 struct RegisterRequest: Encodable {
     let fullName: String
     let username: String
@@ -72,4 +83,75 @@ struct APIErrorResponse: Decodable {
     let code: String
     let message: String
     let field: String?
+}
+
+struct CreatePostRequest: Encodable {
+    let text: String
+    let mediaIds: [String]
+}
+
+struct APIPostAuthor: Decodable {
+    let id: String
+    let fullName: String
+    let username: String
+}
+
+struct APIPostMedia: Decodable {
+    let id: String
+    let mimeType: String
+    let width: Int?
+    let height: Int?
+    let url: String
+    let urlExpiresInSeconds: Int
+}
+
+struct APIPost: Decodable {
+    let id: String
+    let text: String
+    let author: APIPostAuthor
+    let media: [APIPostMedia]
+    let likeCount: Int
+    let saveCount: Int
+    let likedByMe: Bool
+    let savedByMe: Bool
+    let createdAt: String
+    let recommendationReason: String?
+}
+
+struct APIFeedResponse: Decodable {
+    let items: [APIPost]
+    let nextCursor: String?
+    let requestId: String?
+    let modelVersion: String?
+}
+
+struct APIPostInteractionResponse: Decodable {
+    let postId: String
+    let active: Bool
+    let count: Int
+}
+
+struct APIRecommendationEvent: Encodable {
+    let clientEventId: String
+    let sessionId: String
+    let feedRequestId: String?
+    let postId: String?
+    let eventType: String
+    let surface: String
+    let position: Int?
+    let dwellMillis: Int?
+    let completionRatio: Double?
+    let localHour: Int
+    let timezoneOffsetMinutes: Int
+    let targetFeature: String?
+    let occurredAt: String
+}
+
+struct APIRecommendationEventBatch: Encodable {
+    let events: [APIRecommendationEvent]
+}
+
+struct APIRecommendationEventBatchResponse: Decodable {
+    let accepted: Int
+    let ignored: Int
 }

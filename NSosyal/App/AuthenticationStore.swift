@@ -6,17 +6,26 @@ final class AuthenticationStore: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var isRestoringSession = true
     @Published private(set) var currentUser: APIUser?
+    @Published private(set) var dataSourceMode: DataSourceMode = .checking
 
     private let apiClient: APIClient
     private let tokenStore: KeychainTokenStore
 
-    init(apiClient: APIClient = APIClient(), tokenStore: KeychainTokenStore = KeychainTokenStore()) {
-        self.apiClient = apiClient
-        self.tokenStore = tokenStore
+    init() {
+        self.apiClient = APIClient()
+        self.tokenStore = KeychainTokenStore()
     }
 
     func restoreSession() async {
         defer { isRestoringSession = false }
+
+        guard await apiClient.isHealthy() else {
+            dataSourceMode = .mock
+            restoreMockSession()
+            return
+        }
+        dataSourceMode = .backend
+
         guard let tokens = try? tokenStore.load() else {
             clearLocalSession()
             return
@@ -40,7 +49,14 @@ final class AuthenticationStore: ObservableObject {
         password: String,
         acceptedTerms: Bool
     ) async throws -> RegistrationResponse {
-        try await apiClient.register(
+        if dataSourceMode == .mock {
+            return RegistrationResponse(
+                user: mockUser(fullName: fullName, username: username, email: email),
+                verificationRequired: true,
+                developmentCode: "123456"
+            )
+        }
+        return try await apiClient.register(
             RegisterRequest(
                 fullName: fullName,
                 username: username,
@@ -52,6 +68,16 @@ final class AuthenticationStore: ObservableObject {
     }
 
     func verifyEmail(email: String, code: String) async throws {
+        if dataSourceMode == .mock {
+            guard code == "123456" else {
+                throw APIClientError.server(
+                    statusCode: 400,
+                    response: APIErrorResponse(code: "INVALID_CODE", message: "Örnek mod doğrulama kodu 123456.", field: "code")
+                )
+            }
+            authenticateMockUser(email: email)
+            return
+        }
         let response = try await apiClient.verifyEmail(VerifyEmailRequest(email: email, code: code))
         try tokenStore.save(response.tokens)
         currentUser = response.user
@@ -59,10 +85,17 @@ final class AuthenticationStore: ObservableObject {
     }
 
     func resendVerification(email: String) async throws -> VerificationDispatchResponse {
-        try await apiClient.resendVerification(email: email)
+        if dataSourceMode == .mock {
+            return VerificationDispatchResponse(accepted: true, developmentCode: "123456")
+        }
+        return try await apiClient.resendVerification(email: email)
     }
 
     func signIn(email: String, password: String) async throws {
+        if dataSourceMode == .mock {
+            authenticateMockUser(email: email)
+            return
+        }
         let response = try await apiClient.login(LoginRequest(email: email, password: password))
         try tokenStore.save(response.tokens)
         currentUser = response.user
@@ -70,15 +103,26 @@ final class AuthenticationStore: ObservableObject {
     }
 
     func requestPasswordReset(email: String) async throws -> VerificationDispatchResponse {
-        try await apiClient.forgotPassword(email: email)
+        if dataSourceMode == .mock {
+            return VerificationDispatchResponse(accepted: true, developmentCode: "123456")
+        }
+        return try await apiClient.forgotPassword(email: email)
     }
 
     func resetPassword(email: String, code: String, newPassword: String) async throws {
+        if dataSourceMode == .mock {
+            clearLocalSession()
+            return
+        }
         _ = try await apiClient.resetPassword(email: email, code: code, newPassword: newPassword)
         clearLocalSession()
     }
 
     func signOut() async {
+        if dataSourceMode == .mock {
+            clearMockSession()
+            return
+        }
         let refreshToken = (try? tokenStore.load())?.refreshToken
         clearLocalSession()
         guard let refreshToken else { return }
@@ -100,5 +144,38 @@ final class AuthenticationStore: ObservableObject {
         try? tokenStore.clear()
         currentUser = nil
         isAuthenticated = false
+    }
+
+    private func restoreMockSession() {
+        guard UserDefaults.standard.bool(forKey: "nsosyal.mock.authenticated") else {
+            currentUser = nil
+            isAuthenticated = false
+            return
+        }
+        currentUser = mockUser(fullName: "Furkan Durmaz", username: "furkandurmaz", email: "furkan@nsosyal.local")
+        isAuthenticated = true
+    }
+
+    private func authenticateMockUser(email: String) {
+        UserDefaults.standard.set(true, forKey: "nsosyal.mock.authenticated")
+        currentUser = mockUser(fullName: "Furkan Durmaz", username: "furkandurmaz", email: email)
+        isAuthenticated = true
+    }
+
+    private func clearMockSession() {
+        UserDefaults.standard.removeObject(forKey: "nsosyal.mock.authenticated")
+        currentUser = nil
+        isAuthenticated = false
+    }
+
+    private func mockUser(fullName: String, username: String, email: String) -> APIUser {
+        APIUser(
+            id: "mock-user",
+            fullName: fullName,
+            username: username,
+            email: email,
+            emailVerified: true,
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
     }
 }

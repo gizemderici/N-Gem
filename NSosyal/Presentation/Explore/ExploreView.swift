@@ -9,7 +9,7 @@ struct ExploreView: View {
     private let topics = ["Tümü", "Teknoloji", "Tasarım", "Yerel", "Mizah", "Eğitim"]
 
     private var filteredPosts: [SocialPost] {
-        MockSocialData.posts.filter { post in
+        store.posts.filter { post in
             let topicMatches = selectedTopic == "Tümü" || post.topic == selectedTopic
             let queryMatches = query.isEmpty
                 || post.body.localizedCaseInsensitiveContains(query)

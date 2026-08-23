@@ -46,6 +46,20 @@ struct APIClient {
         self.session = session
     }
 
+    func isHealthy() async -> Bool {
+        guard let url = URL(string: "/health", relativeTo: baseURL) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 2.5
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let response: HealthResponse = try await execute(request)
+            return response.status == "ok"
+        } catch {
+            return false
+        }
+    }
+
     func register(_ request: RegisterRequest) async throws -> RegistrationResponse {
         try await send(path: "/api/v1/auth/register", method: "POST", body: request)
     }
@@ -92,6 +106,70 @@ struct APIClient {
 
     func currentUser(accessToken: String) async throws -> APIUser {
         try await send(path: "/api/v1/users/me", method: "GET", accessToken: accessToken)
+    }
+
+    func feed(
+        accessToken: String,
+        cursor: String? = nil,
+        sessionID: UUID? = nil,
+        personalized: Bool = true
+    ) async throws -> APIFeedResponse {
+        var components = URLComponents(string: "/api/v1/posts/feed")
+        var items = [
+            URLQueryItem(name: "limit", value: "50"),
+            URLQueryItem(name: "personalized", value: String(personalized))
+        ]
+        if let cursor { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+        if let sessionID {
+            items.append(URLQueryItem(name: "sessionId", value: sessionID.uuidString))
+            items.append(URLQueryItem(name: "localHour", value: String(Calendar.current.component(.hour, from: Date()))))
+            items.append(URLQueryItem(name: "timezoneOffsetMinutes", value: String(TimeZone.current.secondsFromGMT() / 60)))
+        }
+        components?.queryItems = items
+        return try await send(path: components?.string ?? "/api/v1/posts/feed?limit=50", method: "GET", accessToken: accessToken)
+    }
+
+    func recordRecommendationEvents(_ events: [APIRecommendationEvent], accessToken: String) async throws {
+        guard !events.isEmpty else { return }
+        let _: APIRecommendationEventBatchResponse = try await send(
+            path: "/api/v1/recommendations/events",
+            method: "POST",
+            body: APIRecommendationEventBatch(events: events),
+            accessToken: accessToken
+        )
+    }
+
+    func resetRecommendationProfile(accessToken: String) async throws {
+        let _: MessageResponse = try await send(
+            path: "/api/v1/recommendations/profile",
+            method: "DELETE",
+            accessToken: accessToken
+        )
+    }
+
+    func createPost(text: String, accessToken: String) async throws -> APIPost {
+        try await send(
+            path: "/api/v1/posts",
+            method: "POST",
+            body: CreatePostRequest(text: text, mediaIds: []),
+            accessToken: accessToken
+        )
+    }
+
+    func setLike(postID: String, active: Bool, accessToken: String) async throws -> APIPostInteractionResponse {
+        try await send(
+            path: "/api/v1/posts/\(postID)/like",
+            method: active ? "PUT" : "DELETE",
+            accessToken: accessToken
+        )
+    }
+
+    func setSave(postID: String, active: Bool, accessToken: String) async throws -> APIPostInteractionResponse {
+        try await send(
+            path: "/api/v1/posts/\(postID)/save",
+            method: active ? "PUT" : "DELETE",
+            accessToken: accessToken
+        )
     }
 
     private func send<Response: Decodable>(

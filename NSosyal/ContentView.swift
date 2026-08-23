@@ -49,6 +49,7 @@ struct ContentView: View {
         .preferredColorScheme(.light)
         .task {
             await authenticationStore.restoreSession()
+            await store.configure(dataSourceMode: authenticationStore.dataSourceMode)
         }
     }
 }

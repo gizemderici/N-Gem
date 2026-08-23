@@ -210,8 +210,8 @@ struct ProfileView: View {
 
     private var profileGrid: some View {
         let posts = selectedSection == "Kaydedilenler"
-            ? MockSocialData.posts.filter { store.savedPostIDs.contains($0.id) }
-            : MockSocialData.posts
+            ? store.posts.filter { store.savedPostIDs.contains($0.id) }
+            : store.posts
 
         return Group {
             if posts.isEmpty {

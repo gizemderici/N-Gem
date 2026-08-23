@@ -27,6 +27,9 @@ struct MainTabView: View {
             RecommendationReasonSheet(post: post)
                 .environmentObject(store)
         }
+        .task {
+            await store.refreshFromBackend()
+        }
     }
 
     @ViewBuilder
