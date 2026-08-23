@@ -180,5 +180,6 @@ internal class FakeObjectStorage : ObjectStorage {
     override fun createUploadUrl(key: String, mimeType: String, expiresIn: Duration) = error("unused")
     override fun inspect(key: String): StoredObjectInfo = error("unused")
     override fun createDownloadUrl(key: String, expiresIn: Duration) = "http://storage/$key"
+    override fun readRange(key: String, start: Long, endInclusive: Long) = ByteArray(0)
     override fun delete(key: String) { deletedKeys += key }
 }

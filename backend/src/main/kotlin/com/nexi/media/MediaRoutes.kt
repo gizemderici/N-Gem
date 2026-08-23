@@ -24,10 +24,17 @@ fun Route.mediaRoutes(service: MediaService) {
                 )
             }
             post("/{id}/complete") {
-                call.respond(service.completeUpload(call.authenticatedUserId(), call.mediaId()))
+                // Gövde isteğe bağlı: yalnızca video için kapak görseli taşıyor.
+                val request = runCatching { call.receive<CompleteMediaUploadRequest>() }
+                    .getOrElse { CompleteMediaUploadRequest() }
+                call.respond(service.completeUpload(call.authenticatedUserId(), call.mediaId(), request))
             }
             get("/{id}") {
                 call.respond(service.get(call.authenticatedUserId(), call.mediaId()))
+            }
+            /** İstemci videonun oynatılabilir hale gelmesini bu uçtan yokluyor. */
+            get("/{id}/status") {
+                call.respond(service.status(call.authenticatedUserId(), call.mediaId()))
             }
             delete("/{id}") {
                 service.delete(call.authenticatedUserId(), call.mediaId())

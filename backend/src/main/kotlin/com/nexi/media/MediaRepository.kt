@@ -10,6 +10,18 @@ interface MediaRepository {
     fun create(asset: MediaAsset)
     fun findById(id: UUID): MediaAsset?
     fun markReady(id: UUID, actualSizeBytes: Long, updatedAt: Instant): Boolean
+
+    /** Doğrulama sonrası çözülen video meta verisini ve kapak görselini yazar. */
+    fun saveVideoMetadata(
+        id: UUID,
+        durationSeconds: Double?,
+        width: Int?,
+        height: Int?,
+        thumbnailMediaId: UUID?,
+        updatedAt: Instant,
+    )
+
+    fun markProcessing(id: UUID, status: MediaProcessingStatus, failureReason: String?, updatedAt: Instant)
     fun markStatus(id: UUID, status: MediaStatus, updatedAt: Instant): Boolean
 
     /** Belirtilen durumda takılıp kalmış, [updatedBefore] tarihinden eski kayıtlar. */
@@ -86,6 +98,51 @@ class JdbcMediaRepository(private val dataSource: DataSource) : MediaRepository 
             }
         }
 
+    override fun saveVideoMetadata(
+        id: UUID,
+        durationSeconds: Double?,
+        width: Int?,
+        height: Int?,
+        thumbnailMediaId: UUID?,
+        updatedAt: Instant,
+    ) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """UPDATE media_assets
+                   SET duration_seconds = ?, width = ?, height = ?, thumbnail_media_id = ?, updated_at = ?
+                   WHERE id = ?"""
+            ).use { statement ->
+                if (durationSeconds == null) statement.setNull(1, java.sql.Types.NUMERIC)
+                else statement.setDouble(1, durationSeconds)
+                if (width == null) statement.setNull(2, java.sql.Types.INTEGER) else statement.setInt(2, width)
+                if (height == null) statement.setNull(3, java.sql.Types.INTEGER) else statement.setInt(3, height)
+                statement.setObject(4, thumbnailMediaId)
+                statement.setTimestamp(5, Timestamp.from(updatedAt))
+                statement.setObject(6, id)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun markProcessing(
+        id: UUID,
+        status: MediaProcessingStatus,
+        failureReason: String?,
+        updatedAt: Instant,
+    ) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE media_assets SET processing_status = ?, failure_reason = ?, updated_at = ? WHERE id = ?"
+            ).use { statement ->
+                statement.setString(1, status.name)
+                statement.setString(2, failureReason)
+                statement.setTimestamp(3, Timestamp.from(updatedAt))
+                statement.setObject(4, id)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     private fun ResultSet.toMediaAsset() = MediaAsset(
         id = getObject("id", UUID::class.java),
         ownerId = getObject("owner_id", UUID::class.java),
@@ -97,5 +154,11 @@ class JdbcMediaRepository(private val dataSource: DataSource) : MediaRepository 
         status = MediaStatus.valueOf(getString("status")),
         createdAt = getTimestamp("created_at").toInstant(),
         updatedAt = getTimestamp("updated_at").toInstant(),
+        processingStatus = MediaProcessingStatus.valueOf(getString("processing_status")),
+        failureReason = getString("failure_reason"),
+        durationSeconds = getDouble("duration_seconds").let { if (wasNull()) null else it },
+        width = getInt("width").let { if (wasNull()) null else it },
+        height = getInt("height").let { if (wasNull()) null else it },
+        thumbnailMediaId = getObject("thumbnail_media_id", UUID::class.java),
     )
 }

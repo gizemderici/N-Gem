@@ -299,7 +299,7 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         if (mediaIds.isEmpty()) return
         val placeholders = mediaIds.joinToString(",") { "?" }
         connection.prepareStatement(
-            """SELECT m.id, m.owner_id, m.status, pm.post_id
+            """SELECT m.id, m.owner_id, m.status, m.processing_status, pm.post_id
                FROM media_assets m LEFT JOIN post_media pm ON pm.media_id = m.id
                WHERE m.id IN ($placeholders) FOR UPDATE OF m"""
         ).use { statement ->
@@ -309,7 +309,12 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                 while (results.next()) {
                     val id = results.getObject("id", UUID::class.java)
                     found += id
-                    if (results.getObject("owner_id", UUID::class.java) != ownerId || results.getString("status") != "READY") {
+                    // İşleme bitmeden gönderiye bağlanamaz; bugün video doğrudan
+                    // READY oluyor ama kuyruk eklendiğinde bu kontrol devreye girecek.
+                    if (results.getObject("owner_id", UUID::class.java) != ownerId ||
+                        results.getString("status") != "READY" ||
+                        results.getString("processing_status") != "READY"
+                    ) {
                         throw MediaOwnershipException()
                     }
                     if (results.getObject("post_id") != null) throw MediaAlreadyAttachedException()

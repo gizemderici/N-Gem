@@ -28,6 +28,8 @@ class MediaServiceTest {
         bucket = "test",
         maxImageSizeBytes = 10 * 1024 * 1024,
         maxVideoSizeBytes = 25 * 1024 * 1024,
+        maxVideoDurationSeconds = 180,
+        maxVideoPixels = 3840L * 2160L,
     )
     private val service = MediaService(repository, storage, config, clock)
     private val ownerId = UUID.randomUUID()
@@ -65,12 +67,12 @@ class MediaServiceTest {
 
     @Test
     fun `valid mp4 upload becomes ready`() {
-        val signature = byteArrayOf(
-            0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D,
-        )
-        val upload = service.createUpload(ownerId, CreateMediaUploadRequest("demo.mp4", "video/mp4", signature.size.toLong()))
+        // Artık yalnızca imza yetmiyor: tamamlama adımı `moov` kutusunu da okuyor.
+        val bytes = Mp4Fixtures.mp4(durationSeconds = 6.0, width = 1280, height = 720)
+        val upload = service.createUpload(ownerId, CreateMediaUploadRequest("demo.mp4", "video/mp4", bytes.size.toLong()))
         val asset = assertNotNull(repository.findById(UUID.fromString(upload.mediaId)))
-        storage.objects[asset.storageKey] = StoredObjectInfo(signature.size.toLong(), "video/mp4", signature)
+        storage.objects[asset.storageKey] = StoredObjectInfo(bytes.size.toLong(), "video/mp4", bytes.copyOfRange(0, 32))
+        storage.contents[asset.storageKey] = bytes
 
         val completed = service.completeUpload(ownerId, asset.id)
 
@@ -129,14 +131,53 @@ internal class InMemoryMediaRepository : MediaRepository {
             .filter { it.status == status && it.updatedAt < updatedBefore }
             .sortedBy { it.updatedAt }
             .take(limit)
+
+    override fun saveVideoMetadata(
+        id: UUID,
+        durationSeconds: Double?,
+        width: Int?,
+        height: Int?,
+        thumbnailMediaId: UUID?,
+        updatedAt: Instant,
+    ) {
+        assets.computeIfPresent(id) { _, asset ->
+            asset.copy(
+                durationSeconds = durationSeconds,
+                width = width,
+                height = height,
+                thumbnailMediaId = thumbnailMediaId,
+                updatedAt = updatedAt,
+            )
+        }
+    }
+
+    override fun markProcessing(
+        id: UUID,
+        status: MediaProcessingStatus,
+        failureReason: String?,
+        updatedAt: Instant,
+    ) {
+        assets.computeIfPresent(id) { _, asset ->
+            asset.copy(processingStatus = status, failureReason = failureReason, updatedAt = updatedAt)
+        }
+    }
 }
 
 internal class FakeObjectStorage : ObjectStorage {
     val objects = ConcurrentHashMap<String, StoredObjectInfo>()
     val deletedKeys = mutableSetOf<String>()
+
+    /** Aralık okuması için ham içerik; MP4 çözümleyici bunu okuyor. */
+    val contents = ConcurrentHashMap<String, ByteArray>()
     override fun createUploadUrl(key: String, mimeType: String, expiresIn: Duration) = "http://public-storage/$key?upload"
     override fun inspect(key: String) = objects[key] ?: error("Object does not exist")
     override fun createDownloadUrl(key: String, expiresIn: Duration) = "http://public-storage/$key?download"
+    override fun readRange(key: String, start: Long, endInclusive: Long): ByteArray {
+        val data = contents[key] ?: return ByteArray(0)
+        val from = start.coerceAtMost(data.size.toLong()).toInt()
+        val to = (endInclusive + 1).coerceAtMost(data.size.toLong()).toInt()
+        return if (from >= to) ByteArray(0) else data.copyOfRange(from, to)
+    }
     override fun delete(key: String) {
         objects.remove(key)
         deletedKeys += key

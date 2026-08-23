@@ -49,6 +49,8 @@ data class AppConfig(
                     bucket = env["STORAGE_BUCKET"] ?: "nexi-media",
                     maxImageSizeBytes = env.long("MAX_IMAGE_SIZE_BYTES", 10 * 1024 * 1024),
                     maxVideoSizeBytes = env.long("MAX_VIDEO_SIZE_BYTES", 25 * 1024 * 1024),
+                    maxVideoDurationSeconds = env.long("MAX_VIDEO_DURATION_SECONDS", 180),
+                    maxVideoPixels = env.long("MAX_VIDEO_PIXELS", 3840L * 2160L),
                 ),
                 verificationCodeTtlMinutes = env.long("VERIFICATION_CODE_TTL_MINUTES", 10),
                 exposeDevelopmentCodes = !environment.equals("production", true) &&
@@ -79,6 +81,10 @@ data class StorageConfig(
     val bucket: String,
     val maxImageSizeBytes: Long,
     val maxVideoSizeBytes: Long,
+    /** Kabul edilen en uzun video süresi. */
+    val maxVideoDurationSeconds: Long = 180,
+    /** Genişlik × yükseklik üst sınırı; 4K bugünkü tavan. */
+    val maxVideoPixels: Long = 3840L * 2160L,
 )
 
 private fun Map<String, String>.long(name: String, default: Long): Long =

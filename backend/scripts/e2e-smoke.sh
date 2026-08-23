@@ -98,19 +98,39 @@ BADUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: appli
   -d '{"filename":"x.pdf","mimeType":"application/pdf","sizeBytes":100}')
 [ "$(printf '%s' "$BADUP" | field code)" = "UNSUPPORTED_MEDIA_TYPE" ] && ok "desteklenmeyen tur reddedildi (pdf)" || bad "UNSUPPORTED_MEDIA_TYPE" "$BADUP"
 
-# Video kismen destekleniyor: MIME + boyut + ftyp imzasi kontrol ediliyor.
-# Sure, cozunurluk ve kapak gorseli henuz yok (Faz 8).
-MP4=/tmp/e2e.mp4
-printf '\x00\x00\x00\x20ftypisom\x00\x00\x02\x00' > "$MP4"; head -c 300 /dev/urandom >> "$MP4"
-MP4SIZE=$(wc -c < "$MP4" | tr -d ' ')
-VUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
-  -d "{\"filename\":\"e2e.mp4\",\"mimeType\":\"video/mp4\",\"sizeBytes\":$MP4SIZE}")
-VID=$(printf '%s' "$VUP" | field mediaId); VURL=$(printf '%s' "$VUP" | field uploadUrl)
-curl -s -o /dev/null -m 30 -X PUT "$VURL" -H "Content-Type: video/mp4" --data-binary "@$MP4"
-VDONE=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/$VID/complete")
-[ "$(printf '%s' "$VDONE" | field status)" = "READY" ] && ok "mp4 yuklendi ve ftyp imzasi dogrulandi" || bad "mp4 yukleme" "$VDONE"
+# --- Video: gercek bir MP4 ile. Depodaki demo varlik kullaniliyor. ---
+MP4="${MP4_FIXTURE:-$(cd "$(dirname "$0")/.." && pwd)/seed/assets/teknoloji-demo.mp4}"
+if [ -f "$MP4" ]; then
+  MP4SIZE=$(wc -c < "$MP4" | tr -d ' ')
+  VUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
+    -d "{\"filename\":\"e2e.mp4\",\"mimeType\":\"video/mp4\",\"sizeBytes\":$MP4SIZE}")
+  VID=$(printf '%s' "$VUP" | field mediaId); VURL=$(printf '%s' "$VUP" | field uploadUrl)
+  curl -s -o /dev/null -m 60 -X PUT "$VURL" -H "Content-Type: video/mp4" --data-binary "@$MP4"
 
-# Gecersiz icerikli mp4 reddedilmeli
+  # Kapak gorseli: ayri bir gorsel yukleyip videoya bagliyoruz.
+  TH=/tmp/e2e_thumb.png
+  printf '\211PNG\r\n\032\n' > "$TH"; head -c 120 /dev/urandom >> "$TH"
+  THSIZE=$(wc -c < "$TH" | tr -d ' ')
+  TUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
+    -d "{\"filename\":\"kapak.png\",\"mimeType\":\"image/png\",\"sizeBytes\":$THSIZE}")
+  THID=$(printf '%s' "$TUP" | field mediaId); THURL=$(printf '%s' "$TUP" | field uploadUrl)
+  curl -s -o /dev/null -m 30 -X PUT "$THURL" -H "Content-Type: image/png" --data-binary "@$TH"
+  ca "$TOK_A" -X POST "$BASE/api/v1/media/$THID/complete" >/dev/null
+
+  VDONE=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/$VID/complete" -H 'Content-Type: application/json' \
+    -d "{\"thumbnailMediaId\":\"$THID\"}")
+  [ "$(printf '%s' "$VDONE" | field status)" = "READY" ] && ok "mp4 yuklendi" || bad "mp4 yukleme" "$VDONE"
+  printf '%s' "$VDONE" | grep -qE '"durationSeconds":[0-9]' && ok "video suresi kaptan cozuldu" || bad "video suresi" "$VDONE"
+  printf '%s' "$VDONE" | grep -qE '"width":[0-9]+,"height":[0-9]+' && ok "cozunurluk cozuldu" || bad "cozunurluk" "$VDONE"
+  printf '%s' "$VDONE" | grep -q '"thumbnailUrl":"http' && ok "kapak gorseli baglandi" || bad "kapak gorseli" "$VDONE"
+
+  VSTAT=$(ca "$TOK_A" "$BASE/api/v1/media/$VID/status")
+  [ "$(printf '%s' "$VSTAT" | boolf playable)" = "true" ] && ok "durum ucu: oynatilabilir" || bad "durum ucu" "$VSTAT"
+else
+  echo "  ATLANDI  video testleri (fixture yok: $MP4)"
+fi
+
+# Gecersiz icerikli mp4 reddedilmeli: imzasi bile yok
 FAKE=/tmp/e2e_fake.mp4; printf 'bu bir video degil' > "$FAKE"
 FSIZE=$(wc -c < "$FAKE" | tr -d ' ')
 FUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
@@ -119,6 +139,17 @@ FID=$(printf '%s' "$FUP" | field mediaId); FURL=$(printf '%s' "$FUP" | field upl
 curl -s -o /dev/null -m 30 -X PUT "$FURL" -H "Content-Type: video/mp4" --data-binary "@$FAKE"
 FDONE=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/$FID/complete")
 [ "$(printf '%s' "$FDONE" | field code)" = "INVALID_UPLOADED_FILE" ] && ok "sahte mp4 reddedildi" || bad "sahte mp4" "$FDONE"
+
+# Imzasi dogru ama moov kutusu olmayan dosya da reddedilmeli
+NOMOOV=/tmp/e2e_nomoov.mp4
+printf '\x00\x00\x00\x14ftypisom\x00\x00\x02\x00isom' > "$NOMOOV"
+NMSIZE=$(wc -c < "$NOMOOV" | tr -d ' ')
+NMUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
+  -d "{\"filename\":\"nomoov.mp4\",\"mimeType\":\"video/mp4\",\"sizeBytes\":$NMSIZE}")
+NMID=$(printf '%s' "$NMUP" | field mediaId); NMURL=$(printf '%s' "$NMUP" | field uploadUrl)
+curl -s -o /dev/null -m 30 -X PUT "$NMURL" -H "Content-Type: video/mp4" --data-binary "@$NOMOOV"
+NMDONE=$(ca "$TOK_A" -X POST "$BASE/api/v1/media/$NMID/complete")
+[ "$(printf '%s' "$NMDONE" | field code)" = "INVALID_UPLOADED_FILE" ] && ok "meta verisi okunamayan mp4 reddedildi" || bad "moov'suz mp4" "$NMDONE"
 
 # ---------------------------------------------------------------- 4) Gonderi
 step "4) Gonderi olusturma"

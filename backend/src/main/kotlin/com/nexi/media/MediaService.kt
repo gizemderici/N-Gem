@@ -71,7 +71,11 @@ class MediaService(
         }
     }
 
-    fun completeUpload(ownerId: UUID, mediaId: UUID): MediaAssetResponse {
+    fun completeUpload(
+        ownerId: UUID,
+        mediaId: UUID,
+        request: CompleteMediaUploadRequest = CompleteMediaUploadRequest(),
+    ): MediaAssetResponse {
         val asset = ownedAsset(ownerId, mediaId)
         if (asset.status == MediaStatus.READY) return response(asset, includeDownloadUrl = true)
         if (asset.status != MediaStatus.PENDING) {
@@ -84,18 +88,112 @@ class MediaService(
             throw ApiException(HttpStatusCode.Conflict, "UPLOAD_NOT_FOUND", "Medya henüz depolamaya yüklenmemiş.")
         }
 
-        val invalidReason = validateStoredObject(asset, objectInfo)
-        if (invalidReason != null) {
-            storage.delete(asset.storageKey)
-            repository.markStatus(asset.id, MediaStatus.REJECTED, clock.instant())
-            throw validation("INVALID_UPLOADED_FILE", invalidReason)
+        validateStoredObject(asset, objectInfo)?.let { reject(asset, it) }
+
+        // Kapak görseli yalnızca videoda anlamlı; sahiplik ve tür kontrolü avatarla aynı.
+        val thumbnailId = request.thumbnailMediaId?.let { raw ->
+            if (!asset.isVideo) throw validation("THUMBNAIL_NOT_ALLOWED", "Kapak görseli yalnızca videolara eklenebilir.", "thumbnailMediaId")
+            resolveThumbnail(ownerId, raw)
+        }
+
+        val metadata = if (asset.isVideo) {
+            val parsed = readVideoMetadata(asset) ?: reject(asset, "Video meta verisi okunamadı; dosya bozuk olabilir.")
+            validateVideo(parsed)?.let { reject(asset, it) }
+            parsed
+        } else {
+            null
         }
 
         val now = clock.instant()
         if (!repository.markReady(asset.id, objectInfo.sizeBytes, now)) {
             throw ApiException(HttpStatusCode.Conflict, "MEDIA_STATE_CHANGED", "Medya durumu değişti; tekrar kontrol et.")
         }
-        return response(asset.copy(actualSizeBytes = objectInfo.sizeBytes, status = MediaStatus.READY, updatedAt = now), true)
+        if (metadata != null || thumbnailId != null) {
+            repository.saveVideoMetadata(asset.id, metadata?.durationSeconds, metadata?.width, metadata?.height, thumbnailId, now)
+        }
+        // İşleme kuyruğu olmadığı için doğrulamayı geçen içerik doğrudan oynatılabilir.
+        repository.markProcessing(asset.id, MediaProcessingStatus.READY, null, now)
+
+        return response(
+            asset.copy(
+                actualSizeBytes = objectInfo.sizeBytes,
+                status = MediaStatus.READY,
+                processingStatus = MediaProcessingStatus.READY,
+                durationSeconds = metadata?.durationSeconds,
+                width = metadata?.width,
+                height = metadata?.height,
+                thumbnailMediaId = thumbnailId,
+                updatedAt = now,
+            ),
+            includeDownloadUrl = true,
+        )
+    }
+
+    fun status(ownerId: UUID, mediaId: UUID): MediaStatusResponse {
+        val asset = ownedAsset(ownerId, mediaId)
+        return MediaStatusResponse(
+            id = asset.id.toString(),
+            status = asset.status.name,
+            processingStatus = asset.processingStatus.name,
+            playable = asset.status == MediaStatus.READY && asset.processingStatus == MediaProcessingStatus.READY,
+            failureReason = asset.failureReason,
+            durationSeconds = asset.durationSeconds,
+            width = asset.width,
+            height = asset.height,
+        )
+    }
+
+    /** Reddedilen yükleme depodan silinir ve nedeni kaydedilir. */
+    private fun reject(asset: MediaAsset, reason: String): Nothing {
+        val now = clock.instant()
+        runCatching { storage.delete(asset.storageKey) }
+        repository.markStatus(asset.id, MediaStatus.REJECTED, now)
+        repository.markProcessing(asset.id, MediaProcessingStatus.FAILED, reason, now)
+        throw validation("INVALID_UPLOADED_FILE", reason)
+    }
+
+    private fun resolveThumbnail(ownerId: UUID, rawId: String): UUID {
+        val id = runCatching { UUID.fromString(rawId) }.getOrElse {
+            throw validation("INVALID_MEDIA_ID", "Kapak görseli kimliği geçersiz.", "thumbnailMediaId")
+        }
+        val thumbnail = repository.findById(id)
+        // Başkasının görselinin varlığını açığa çıkarmamak için "yok" ile aynı hata.
+        if (thumbnail == null || thumbnail.ownerId != ownerId) {
+            throw validation("MEDIA_NOT_AVAILABLE", "Kapak görseli bulunamadı veya sana ait değil.", "thumbnailMediaId")
+        }
+        if (thumbnail.status != MediaStatus.READY) {
+            throw validation("MEDIA_NOT_READY", "Kapak görseli henüz hazır değil.", "thumbnailMediaId")
+        }
+        if (!thumbnail.mimeType.startsWith("image/")) {
+            throw validation("THUMBNAIL_MUST_BE_IMAGE", "Kapak görseli bir görsel olmalı.", "thumbnailMediaId")
+        }
+        return id
+    }
+
+    /**
+     * `moov` kutusu dosyanın başında da sonunda da olabilir (`faststart`
+     * uygulanmamış dosyalarda sondadır), bu yüzden önce baş, sonra son okunuyor.
+     */
+    private fun readVideoMetadata(asset: MediaAsset): Mp4Metadata? {
+        val size = asset.actualSizeBytes ?: asset.declaredSizeBytes
+        val window = Mp4Parser.SCAN_WINDOW_BYTES.toLong()
+
+        val head = runCatching { storage.readRange(asset.storageKey, 0, minOf(window, size) - 1) }.getOrNull()
+        Mp4Parser.parse(head ?: ByteArray(0))?.let { return it }
+
+        if (size <= window) return null
+        val tail = runCatching { storage.readRange(asset.storageKey, size - window, size - 1) }.getOrNull()
+        return Mp4Parser.parse(tail ?: ByteArray(0))
+    }
+
+    private fun validateVideo(metadata: Mp4Metadata): String? {
+        if (metadata.durationSeconds <= 0) return "Video süresi okunamadı."
+        if (metadata.durationSeconds > config.maxVideoDurationSeconds) {
+            return "Video en fazla ${config.maxVideoDurationSeconds} saniye olabilir."
+        }
+        val pixels = metadata.width.toLong() * metadata.height.toLong()
+        if (pixels > config.maxVideoPixels) return "Video çözünürlüğü izin verilen sınırın üzerinde."
+        return null
     }
 
     fun get(ownerId: UUID, mediaId: UUID): MediaAssetResponse {
@@ -146,14 +244,28 @@ class MediaService(
 
     private fun response(asset: MediaAsset, includeDownloadUrl: Boolean): MediaAssetResponse {
         val url = if (includeDownloadUrl) storage.createDownloadUrl(asset.storageKey, downloadExpiry) else null
+        // Kapak görselinin adresi ayrı bir kayıttan geliyor; yoksa alan boş kalır.
+        val thumbnailKey = asset.thumbnailMediaId
+            ?.let { repository.findById(it) }
+            ?.takeIf { it.status == MediaStatus.READY }
+            ?.storageKey
+        val thumbnailUrl = thumbnailKey?.let { storage.createDownloadUrl(it, downloadExpiry) }
+
         return MediaAssetResponse(
             id = asset.id.toString(),
             filename = asset.originalFilename,
             mimeType = asset.mimeType,
             sizeBytes = asset.actualSizeBytes ?: asset.declaredSizeBytes,
             status = asset.status.name,
+            processingStatus = asset.processingStatus.name,
+            failureReason = asset.failureReason,
             downloadUrl = url,
             downloadUrlExpiresInSeconds = if (url == null) null else downloadExpiry.seconds,
+            durationSeconds = asset.durationSeconds,
+            width = asset.width,
+            height = asset.height,
+            thumbnailUrl = thumbnailUrl,
+            thumbnailUrlExpiresInSeconds = if (thumbnailUrl == null) null else downloadExpiry.seconds,
             createdAt = asset.createdAt.toString(),
         )
     }

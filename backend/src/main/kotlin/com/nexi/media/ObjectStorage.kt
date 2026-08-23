@@ -27,6 +27,14 @@ interface ObjectStorage : AutoCloseable {
     fun inspect(key: String): StoredObjectInfo
     fun createDownloadUrl(key: String, expiresIn: Duration): String
     fun delete(key: String)
+
+    /**
+     * Nesnenin bir parçasını okur. MP4 meta verisi için gerekiyor: `moov` kutusu
+     * dosyanın başında da sonunda da olabildiği için iki pencere okunuyor.
+     * Aralık nesnenin dışına taşarsa depo elindeki kadarını döner.
+     */
+    fun readRange(key: String, start: Long, endInclusive: Long): ByteArray
+
     override fun close() = Unit
 }
 
@@ -78,6 +86,15 @@ class S3ObjectStorage(private val config: StorageConfig) : ObjectStorage {
         )
         return StoredObjectInfo(head.contentLength(), head.contentType(), bytes.asByteArray())
     }
+
+    override fun readRange(key: String, start: Long, endInclusive: Long): ByteArray =
+        client.getObjectAsBytes(
+            GetObjectRequest.builder()
+                .bucket(config.bucket)
+                .key(key)
+                .range("bytes=$start-$endInclusive")
+                .build()
+        ).asByteArray()
 
     override fun createDownloadUrl(key: String, expiresIn: Duration): String {
         val objectRequest = GetObjectRequest.builder()

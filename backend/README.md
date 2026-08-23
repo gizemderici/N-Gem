@@ -54,9 +54,9 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 66 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 71 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
-yükleme (görsel ve video), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
+yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
 takip, takip içeriğinin akışa girmesi, avatar/biyografi ve öneri olayları.
 
 ```bash
@@ -208,6 +208,58 @@ Backend depolamadaki gerçek boyutu, Content-Type değerini ve dosya imzasını 
 - `DELETE /api/v1/media/{mediaId}`
 
 JPEG, PNG ve WebP görseller için üst sınır 10 MB, MP4 videolar için 25 MB'dir. Bir kullanıcı başka bir kullanıcının hazırlık aşamasındaki medyasına erişemez veya onu silemez.
+
+### Video
+
+Tamamlama adımı MP4 kabını çözerek **süre ve çözünürlüğü** okur. Sunucuda FFmpeg
+yok ve gerekmiyor: `moov/mvhd` süreyi, en büyük `moov/trak/tkhd` ise boyutu
+veriyor. `moov` kutusu dosyanın sonunda olabildiği için (`faststart`
+uygulanmamış dosyalar) hem baştan hem sondan 512 KB'lık pencere taranır.
+
+| Sınır | Varsayılan | Değişken |
+|---|---|---|
+| Süre | 180 sn | `MAX_VIDEO_DURATION_SECONDS` |
+| Çözünürlük | 4K (8.294.400 piksel) | `MAX_VIDEO_PIXELS` |
+| Boyut | 25 MB | `MAX_VIDEO_SIZE_BYTES` |
+
+Meta verisi okunamayan dosya reddedilir — imzası doğru olsa bile. Reddedilen
+yükleme depodan silinir, `status=REJECTED` ve `processing_status=FAILED` olur,
+`failure_reason` nedeni saklar.
+
+**Kapak görseli.** Sunucu kare çıkaramadığı için istemci kareyi kendi üretip
+normal bir görsel olarak yükler, sonra tamamlama isteğinde bağlar:
+
+```json
+POST /api/v1/media/{videoId}/complete
+{ "thumbnailMediaId": "<hazır görsel>" }
+```
+
+Gövde isteğe bağlıdır. Kapak yalnızca videoya eklenebilir (`THUMBNAIL_NOT_ALLOWED`)
+ve kendisi görsel olmalıdır (`THUMBNAIL_MUST_BE_IMAGE`).
+
+**İki ayrı durum sütunu var ve karıştırılmamalı:**
+
+- `status` — yüklemenin kabul edilip edilmediği: `PENDING → READY / REJECTED / DELETED`
+- `processing_status` — içeriğin oynatılabilir olup olmadığı: `PENDING_UPLOAD → UPLOADED → PROCESSING → READY / FAILED`
+
+Bugün işleme kuyruğu olmadığı için ikisi birlikte ilerliyor. FFmpeg kuyruğu
+eklendiğinde video `status=READY, processing_status=PROCESSING` durumunda
+bekleyebilecek; gönderiye bağlanabilmesi için **ikisinin de** `READY` olması
+şart (bu kontrol şimdiden yerinde).
+
+`GET /api/v1/media/{id}/status` istemcinin oynatılabilirliği yokladığı hafif uçtur:
+
+```json
+{
+  "id": "<uuid>",
+  "status": "READY",
+  "processingStatus": "READY",
+  "playable": true,
+  "durationSeconds": 12.5,
+  "width": 1280,
+  "height": 720
+}
+```
 
 ## Gönderiler ve akış
 
