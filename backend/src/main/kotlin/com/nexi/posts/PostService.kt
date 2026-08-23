@@ -3,11 +3,18 @@ package com.nexi.posts
 import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.ObjectStorage
+import com.nexi.recommendations.ContextualRanker
+import com.nexi.recommendations.EmptyRecommendationRepository
+import com.nexi.recommendations.FeedRecommendationContext
+import com.nexi.recommendations.RecommendationEvent
+import com.nexi.recommendations.RecommendationEventType
+import com.nexi.recommendations.RecommendationRepository
 import io.ktor.http.HttpStatusCode
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Base64
 import java.util.UUID
 
@@ -15,6 +22,8 @@ class PostService(
     private val repository: PostRepository,
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
+    private val recommendationRepository: RecommendationRepository = EmptyRecommendationRepository,
+    private val ranker: ContextualRanker = ContextualRanker(),
 ) {
     private val mediaUrlExpiry = Duration.ofMinutes(15)
 
@@ -25,7 +34,7 @@ class PostService(
 
         val mediaIds = request.mediaIds.map { rawId ->
             runCatching { UUID.fromString(rawId) }.getOrElse {
-                throw validation("INVALID_MEDIA_ID", "Görsel kimliği geçersiz.", "mediaIds")
+                throw validation("INVALID_MEDIA_ID", "Medya kimliği geçersiz.", "mediaIds")
             }
         }
         if (mediaIds.distinct().size != mediaIds.size) {
@@ -38,9 +47,9 @@ class PostService(
         val post = try {
             repository.create(ownerId, body, mediaIds, clock.instant())
         } catch (_: MediaOwnershipException) {
-            throw validation("MEDIA_NOT_AVAILABLE", "Görsellerden biri hazır değil veya sana ait değil.", "mediaIds")
+            throw validation("MEDIA_NOT_AVAILABLE", "Medya dosyalarından biri hazır değil veya sana ait değil.", "mediaIds")
         } catch (_: MediaAlreadyAttachedException) {
-            throw ApiException(HttpStatusCode.Conflict, "MEDIA_ALREADY_ATTACHED", "Görsellerden biri başka bir gönderide kullanılıyor.")
+            throw ApiException(HttpStatusCode.Conflict, "MEDIA_ALREADY_ATTACHED", "Medya dosyalarından biri başka bir gönderide kullanılıyor.")
         }
         val details = repository.findDetails(post.id, ownerId)
             ?: throw ApiException(HttpStatusCode.InternalServerError, "POST_CREATION_FAILED", "Gönderi oluşturulamadı.")
@@ -52,14 +61,68 @@ class PostService(
             ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
     )
 
-    fun feed(viewerId: UUID, rawCursor: String?, requestedLimit: Int?): FeedResponse {
+    fun feed(
+        viewerId: UUID,
+        rawCursor: String?,
+        requestedLimit: Int?,
+        recommendationContext: FeedRecommendationContext? = null,
+        personalizationEnabled: Boolean = true,
+    ): FeedResponse {
         val limit = (requestedLimit ?: 20).coerceIn(1, 50)
         val cursor = rawCursor?.let(::decodeCursor)
+        if (cursor == null && personalizationEnabled && recommendationRepository.personalizationAvailable) {
+            return personalizedFeed(viewerId, limit, recommendationContext)
+        }
         val details = repository.feed(viewerId, cursor, limit + 1)
         val hasMore = details.size > limit
         val page = details.take(limit)
         val nextCursor = if (hasMore) page.lastOrNull()?.post?.let(::encodeCursor) else null
         return FeedResponse(page.map(::response), nextCursor)
+    }
+
+    private fun personalizedFeed(
+        viewerId: UUID,
+        limit: Int,
+        requestedContext: FeedRecommendationContext?,
+    ): FeedResponse {
+        val now = clock.instant()
+        val context = requestedContext ?: FeedRecommendationContext(
+            localHour = now.atZone(ZoneOffset.UTC).hour,
+            timezoneOffsetMinutes = 0,
+            sessionId = UUID.randomUUID(),
+        )
+        val candidates = repository.feed(viewerId, null, 200)
+        val signals = recommendationRepository.recentSignals(viewerId, 2_000)
+        val ranked = ranker.rank(viewerId, candidates, signals, context, now).take(limit)
+        val requestId = UUID.randomUUID()
+        recommendationRepository.append(
+            ranked.mapIndexed { index, rankedPost ->
+                RecommendationEvent(
+                    id = UUID.randomUUID(),
+                    userId = viewerId,
+                    postId = rankedPost.details.post.id,
+                    clientEventId = UUID.randomUUID(),
+                    sessionId = context.sessionId,
+                    feedRequestId = requestId,
+                    eventType = RecommendationEventType.CONTENT_IMPRESSION,
+                    surface = "feed",
+                    position = index,
+                    dwellMillis = null,
+                    completionRatio = null,
+                    localHour = context.localHour,
+                    timezoneOffsetMinutes = context.timezoneOffsetMinutes,
+                    targetFeature = null,
+                    occurredAt = now,
+                    receivedAt = now,
+                )
+            }
+        )
+        return FeedResponse(
+            items = ranked.map { response(it.details, it.reason) },
+            nextCursor = null,
+            requestId = requestId.toString(),
+            modelVersion = ranker.modelVersion,
+        )
     }
 
     fun delete(ownerId: UUID, postId: UUID) {
@@ -86,7 +149,7 @@ class PostService(
         }
     }
 
-    private fun response(details: PostDetails): PostResponse = PostResponse(
+    private fun response(details: PostDetails, recommendationReason: String? = null): PostResponse = PostResponse(
         id = details.post.id.toString(),
         text = details.post.body,
         author = details.author,
@@ -103,6 +166,7 @@ class PostService(
         likedByMe = details.likedByViewer,
         savedByMe = details.savedByViewer,
         createdAt = details.post.createdAt.toString(),
+        recommendationReason = recommendationReason,
     )
 
     private fun encodeCursor(post: Post): String {

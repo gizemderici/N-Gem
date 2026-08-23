@@ -2,3 +2,7 @@
 build/
 .env
 *.log
+recommender-lab/data/
+recommender-lab/output/
+recommender-lab/__pycache__/
+recommender-lab/tests/__pycache__/

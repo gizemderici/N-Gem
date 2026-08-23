@@ -20,20 +20,22 @@ class MediaService(
         "image/jpeg" to "jpg",
         "image/png" to "png",
         "image/webp" to "webp",
+        "video/mp4" to "mp4",
     )
 
     fun createUpload(ownerId: UUID, request: CreateMediaUploadRequest): CreateMediaUploadResponse {
         val filename = request.filename.trim()
         val mimeType = request.mimeType.trim().lowercase()
         val extension = supportedTypes[mimeType]
-            ?: throw validation("UNSUPPORTED_MEDIA_TYPE", "Yalnızca JPEG, PNG ve WebP görseller yüklenebilir.", "mimeType")
+            ?: throw validation("UNSUPPORTED_MEDIA_TYPE", "Yalnızca JPEG, PNG, WebP görseller ve MP4 videolar yüklenebilir.", "mimeType")
         if (filename.isBlank() || filename.length > 255) {
             throw validation("INVALID_FILENAME", "Dosya adı 1-255 karakter olmalı.", "filename")
         }
-        if (request.sizeBytes !in 1..config.maxImageSizeBytes) {
+        val maxSizeBytes = maxSizeFor(mimeType)
+        if (request.sizeBytes !in 1..maxSizeBytes) {
             throw validation(
                 "INVALID_MEDIA_SIZE",
-                "Görsel boyutu 1 byte ile ${config.maxImageSizeBytes} byte arasında olmalı.",
+                "Medya boyutu 1 byte ile $maxSizeBytes byte arasında olmalı.",
                 "sizeBytes",
             )
         }
@@ -73,13 +75,13 @@ class MediaService(
         val asset = ownedAsset(ownerId, mediaId)
         if (asset.status == MediaStatus.READY) return response(asset, includeDownloadUrl = true)
         if (asset.status != MediaStatus.PENDING) {
-            throw ApiException(HttpStatusCode.Conflict, "MEDIA_NOT_PENDING", "Bu görsel yükleme için uygun durumda değil.")
+            throw ApiException(HttpStatusCode.Conflict, "MEDIA_NOT_PENDING", "Bu medya yükleme için uygun durumda değil.")
         }
 
         val objectInfo = try {
             storage.inspect(asset.storageKey)
         } catch (_: software.amazon.awssdk.services.s3.model.NoSuchKeyException) {
-            throw ApiException(HttpStatusCode.Conflict, "UPLOAD_NOT_FOUND", "Görsel henüz depolamaya yüklenmemiş.")
+            throw ApiException(HttpStatusCode.Conflict, "UPLOAD_NOT_FOUND", "Medya henüz depolamaya yüklenmemiş.")
         }
 
         val invalidReason = validateStoredObject(asset, objectInfo)
@@ -91,7 +93,7 @@ class MediaService(
 
         val now = clock.instant()
         if (!repository.markReady(asset.id, objectInfo.sizeBytes, now)) {
-            throw ApiException(HttpStatusCode.Conflict, "MEDIA_STATE_CHANGED", "Görsel durumu değişti; tekrar kontrol et.")
+            throw ApiException(HttpStatusCode.Conflict, "MEDIA_STATE_CHANGED", "Medya durumu değişti; tekrar kontrol et.")
         }
         return response(asset.copy(actualSizeBytes = objectInfo.sizeBytes, status = MediaStatus.READY, updatedAt = now), true)
     }
@@ -99,7 +101,7 @@ class MediaService(
     fun get(ownerId: UUID, mediaId: UUID): MediaAssetResponse {
         val asset = ownedAsset(ownerId, mediaId)
         if (asset.status != MediaStatus.READY) {
-            throw ApiException(HttpStatusCode.Conflict, "MEDIA_NOT_READY", "Görsel henüz kullanıma hazır değil.")
+            throw ApiException(HttpStatusCode.Conflict, "MEDIA_NOT_READY", "Medya henüz kullanıma hazır değil.")
         }
         return response(asset, includeDownloadUrl = true)
     }
@@ -113,21 +115,21 @@ class MediaService(
 
     private fun ownedAsset(ownerId: UUID, mediaId: UUID): MediaAsset {
         val asset = repository.findById(mediaId)
-            ?: throw ApiException(HttpStatusCode.NotFound, "MEDIA_NOT_FOUND", "Görsel bulunamadı.")
+            ?: throw ApiException(HttpStatusCode.NotFound, "MEDIA_NOT_FOUND", "Medya bulunamadı.")
         if (asset.ownerId != ownerId) {
             // Varlığın başka kullanıcıya ait olduğunu açığa çıkarmıyoruz.
-            throw ApiException(HttpStatusCode.NotFound, "MEDIA_NOT_FOUND", "Görsel bulunamadı.")
+            throw ApiException(HttpStatusCode.NotFound, "MEDIA_NOT_FOUND", "Medya bulunamadı.")
         }
         return asset
     }
 
     private fun validateStoredObject(asset: MediaAsset, info: StoredObjectInfo): String? {
         if (info.sizeBytes != asset.declaredSizeBytes) return "Yüklenen dosyanın boyutu bildirilen değerle eşleşmiyor."
-        if (info.sizeBytes !in 1..config.maxImageSizeBytes) return "Yüklenen dosya izin verilen boyutu aşıyor."
+        if (info.sizeBytes !in 1..maxSizeFor(asset.mimeType)) return "Yüklenen dosya izin verilen boyutu aşıyor."
         if (info.mimeType?.substringBefore(';')?.trim()?.lowercase() != asset.mimeType) {
             return "Yüklenen dosyanın içerik türü eşleşmiyor."
         }
-        if (!signatureMatches(asset.mimeType, info.signatureBytes)) return "Dosya içeriği geçerli bir görsel değil."
+        if (!signatureMatches(asset.mimeType, info.signatureBytes)) return "Dosya içeriği geçerli bir medya değil."
         return null
     }
 
@@ -135,8 +137,12 @@ class MediaService(
         "image/jpeg" -> bytes.startsWith(0xFF, 0xD8, 0xFF)
         "image/png" -> bytes.startsWith(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
         "image/webp" -> bytes.startsWithAscii("RIFF") && bytes.drop(8).toByteArray().startsWithAscii("WEBP")
+        "video/mp4" -> bytes.size >= 12 && bytes.copyOfRange(4, 8).startsWithAscii("ftyp")
         else -> false
     }
+
+    private fun maxSizeFor(mimeType: String): Long =
+        if (mimeType.startsWith("video/")) config.maxVideoSizeBytes else config.maxImageSizeBytes
 
     private fun response(asset: MediaAsset, includeDownloadUrl: Boolean): MediaAssetResponse {
         val url = if (includeDownloadUrl) storage.createDownloadUrl(asset.storageKey, downloadExpiry) else null

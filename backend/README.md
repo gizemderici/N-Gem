@@ -131,9 +131,9 @@ Sıfırlama tamamlandığında kullanıcının bütün refresh oturumları iptal
 | `POST` | `/api/v1/auth/resend-verification` | Yeni e-posta doğrulama kodu ister |
 | `GET` | `/health` | Servis sağlık kontrolü |
 
-## Görsel yükleme
+## Medya yükleme
 
-Görseller backend üzerinden taşınmaz. Kimliği doğrulanmış uygulama backend'den süreli yükleme adresi alır ve dosyayı doğrudan MinIO/S3'e gönderir.
+Medya dosyaları backend üzerinden taşınmaz. Kimliği doğrulanmış uygulama backend'den süreli yükleme adresi alır ve dosyayı doğrudan MinIO/S3'e gönderir.
 
 ### 1. Yükleme başlat
 
@@ -159,16 +159,16 @@ Yanıttaki `uploadUrl` adresine `PUT` isteği yapılır. `requiredHeaders` için
 
 Backend depolamadaki gerçek boyutu, Content-Type değerini ve dosya imzasını kontrol eder. Başarılı yanıt süreli bir `downloadUrl` içerir.
 
-### 3. Görsel bilgisi veya silme
+### 3. Medya bilgisi veya silme
 
 - `GET /api/v1/media/{mediaId}`
 - `DELETE /api/v1/media/{mediaId}`
 
-Bu ilk sürüm JPEG, PNG ve WebP kabul eder; üst sınır 10 MB'dir. Bir kullanıcı başka bir kullanıcının hazırlık aşamasındaki görseline erişemez veya onu silemez.
+JPEG, PNG ve WebP görseller için üst sınır 10 MB, MP4 videolar için 25 MB'dir. Bir kullanıcı başka bir kullanıcının hazırlık aşamasındaki medyasına erişemez veya onu silemez.
 
 ## Gönderiler ve akış
 
-Hazır duruma gelen görseller `mediaId` ile bir gönderiye bağlanır. Bir görsel yalnızca bir gönderide kullanılabilir ve gönderiyi oluşturan kullanıcıya ait olmalıdır.
+Hazır duruma gelen medya dosyaları `mediaId` ile bir gönderiye bağlanır. Bir medya dosyası yalnızca bir gönderide kullanılabilir ve gönderiyi oluşturan kullanıcıya ait olmalıdır.
 
 ### Gönderi oluştur
 
@@ -181,16 +181,37 @@ Hazır duruma gelen görseller `mediaId` ile bir gönderiye bağlanır. Bir gör
 }
 ```
 
-Metin 2000 karakterle, görseller dört adetle sınırlıdır. Metin veya en az bir görsel zorunludur.
+Metin 2000 karakterle, medya dosyaları dört adetle sınırlıdır. Metin veya en az bir medya zorunludur.
+
+## Görsel ve videolu demo verisi
+
+Backend, PostgreSQL ve MinIO çalışırken özgün demo varlıklarını gerçek API üzerinden yüklemek için:
+
+```bash
+python3 seed/seed_demo.py
+```
+
+Araç altı doğrulanmış demo hesap oluşturur, `seed/assets` altındaki dört JPEG ve iki MP4 dosyasını süreli yükleme adresleriyle MinIO'ya gönderir, örnek gönderi ve etkileşimleri ekler. Aynı içerikleri ikinci kez oluşturmaz. Sonunda iş saati ve akşam bağlamı için kişiselleştirilmiş ilk beş sonucu yazdırır.
+
+Mobil uygulamada deneme hesabı:
+
+```text
+E-posta: demo.deneme@nsosyal.local
+Şifre: Demo1234!
+```
+
+Demo varlıklarının üretim özeti ve prompt seti `seed/PROMPTS.md` dosyasındadır.
 
 ### Sayfalı akış
 
 ```text
 GET /api/v1/posts/feed?limit=20
 GET /api/v1/posts/feed?limit=20&cursor=<nextCursor>
+GET /api/v1/posts/feed?limit=20&sessionId=<uuid>&localHour=21&timezoneOffsetMinutes=180
+GET /api/v1/posts/feed?limit=20&personalized=false
 ```
 
-Yanıt her gönderi için herkese açık yazar bilgilerini, süreli görsel adreslerini, beğeni/kayıt sayılarını ve görüntüleyen kullanıcının etkileşim durumunu içerir. Yazar e-postası akışta paylaşılmaz.
+İlk sayfada geçerli oturum ve saat bağlamı gönderildiğinde `nexi-contextual-v1` sıralayıcısı kullanılır. Yanıt `requestId`, `modelVersion` ve gönderi başına okunabilir `recommendationReason` alanlarını içerir. `personalized=false` olduğunda profil okunmaz, gösterim olayı yazılmaz ve kronolojik akış döner. Kişiselleştirme deposu yapılandırılmamış test/yerel bağlamlarda da kronolojik fallback korunur. Yazar e-postası akışta paylaşılmaz.
 
 ### Gönderi işlemleri
 
@@ -202,6 +223,40 @@ Yanıt her gönderi için herkese açık yazar bilgilerini, süreli görsel adre
 | `DELETE` | `/api/v1/posts/{id}/like` | Beğeniyi kaldırır |
 | `PUT` | `/api/v1/posts/{id}/save` | Kaydeder; tekrar çağrılması güvenlidir |
 | `DELETE` | `/api/v1/posts/{id}/save` | Kaydı kaldırır |
+
+## Bağlamsal öneri modeli
+
+Mobil istemciler ham dokunma koordinatı yerine anlamlı ürün olaylarını toplu olarak gönderir:
+
+`POST /api/v1/recommendations/events`
+
+```json
+{
+  "events": [{
+    "clientEventId": "<uuid>",
+    "sessionId": "<uuid>",
+    "feedRequestId": "<uuid>",
+    "postId": "<uuid>",
+    "eventType": "content_view",
+    "surface": "feed",
+    "dwellMillis": 12500,
+    "completionRatio": 0.72,
+    "localHour": 21,
+    "timezoneOffsetMinutes": 180,
+    "occurredAt": "2026-08-23T18:00:00Z"
+  }]
+}
+```
+
+Desteklenen sinyaller oturum başlangıcı, açık ilgi seçimi, gösterim, görüntüleme/tamamlama, beğeni, kaydetme, paylaşma, gizleme, bildirme ve öneri gerekçesini açmadır. Olay kimlikleri kullanıcı bazında idempotenttir; süre, saat, gönderi sahipliği ve olay zamanı backendde doğrulanır.
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/api/v1/recommendations/events` | En fazla 100 öneri olayını kaydeder |
+| `GET` | `/api/v1/recommendations/profile?localHour=21` | Okunabilir ilgi ve saat tercih özetini döndürür |
+| `DELETE` | `/api/v1/recommendations/profile` | Kullanıcının öğrenilmiş olay profilini siler |
+
+Model; konu, üretici ve medya türü yakınlıklarını günün dört zaman diliminde farklı ağırlıklandırır; yenilik, topluluk ilgisi, keşif ve çeşitlilikle birleştirir. Dış veri seti araştırması, dönüştürücüler, model kartı ve gerçek KuaiRand benchmark sonucu [`recommender-lab`](recommender-lab/README.md) klasöründedir.
 
 Hatalar tutarlı bir biçimde döner:
 

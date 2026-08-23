@@ -40,6 +40,7 @@ data class AppConfig(
                     secretKey = env["STORAGE_SECRET_KEY"] ?: "nexi_dev_storage_password",
                     bucket = env["STORAGE_BUCKET"] ?: "nexi-media",
                     maxImageSizeBytes = env.long("MAX_IMAGE_SIZE_BYTES", 10 * 1024 * 1024),
+                    maxVideoSizeBytes = env.long("MAX_VIDEO_SIZE_BYTES", 25 * 1024 * 1024),
                 ),
                 verificationCodeTtlMinutes = env.long("VERIFICATION_CODE_TTL_MINUTES", 10),
                 exposeDevelopmentCodes = !environment.equals("production", true) &&
@@ -67,6 +68,7 @@ data class StorageConfig(
     val secretKey: String,
     val bucket: String,
     val maxImageSizeBytes: Long,
+    val maxVideoSizeBytes: Long,
 )
 
 private fun Map<String, String>.long(name: String, default: Long): Long =

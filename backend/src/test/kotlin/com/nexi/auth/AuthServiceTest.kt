@@ -36,6 +36,7 @@ class AuthServiceTest {
             secretKey = "test-secret",
             bucket = "test-media",
             maxImageSizeBytes = 10 * 1024 * 1024,
+            maxVideoSizeBytes = 25 * 1024 * 1024,
         ),
         verificationCodeTtlMinutes = 10,
         exposeDevelopmentCodes = true,

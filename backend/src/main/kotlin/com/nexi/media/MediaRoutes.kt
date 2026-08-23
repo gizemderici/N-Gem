@@ -31,7 +31,7 @@ fun Route.mediaRoutes(service: MediaService) {
             }
             delete("/{id}") {
                 service.delete(call.authenticatedUserId(), call.mediaId())
-                call.respond(MessageResponse("Görsel silindi."))
+                call.respond(MessageResponse("Medya silindi."))
             }
         }
     }
@@ -40,6 +40,6 @@ fun Route.mediaRoutes(service: MediaService) {
 private fun io.ktor.server.application.ApplicationCall.mediaId(): UUID {
     val rawId = parameters["id"]
     return runCatching { UUID.fromString(rawId) }.getOrElse {
-        throw ApiException(HttpStatusCode.BadRequest, "INVALID_MEDIA_ID", "Görsel kimliği geçersiz.", "id")
+        throw ApiException(HttpStatusCode.BadRequest, "INVALID_MEDIA_ID", "Medya kimliği geçersiz.", "id")
     }
 }

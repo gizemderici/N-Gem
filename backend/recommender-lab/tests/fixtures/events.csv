@@ -1,0 +1,14 @@
+user_id,item_id,timestamp,local_hour,event_type,topics,creator_id,media_type,dwell_ms,completion_ratio
+u1,tech-1,2026-01-01T10:00:00Z,13,content_view,technology,c1,video,30000,0.8
+u1,tech-1,2026-01-02T10:00:00Z,13,content_liked,technology,c1,video,0,0
+u1,local-1,2026-01-02T12:00:00Z,15,content_impression,local,c6,text,0,0
+u1,comedy-1,2026-01-03T18:00:00Z,21,content_view,comedy,c2,video,25000,0.9
+u1,comedy-2,2026-01-04T18:00:00Z,21,content_saved,comedy,c3,video,0,0
+u2,design-1,2026-01-01T09:00:00Z,12,content_view,design,c4,image,22000,1
+u2,design-1,2026-01-02T09:00:00Z,12,content_saved,design,c4,image,0,0
+u2,tech-1,2026-01-03T09:00:00Z,12,content_view,technology,c1,video,10000,0.3
+u2,design-2,2026-01-04T09:00:00Z,12,content_liked,design,c5,image,0,0
+u3,comedy-1,2026-01-01T20:00:00Z,23,content_view,comedy,c2,video,40000,1
+u3,comedy-1,2026-01-02T20:00:00Z,23,content_shared,comedy,c2,video,0,0
+u3,tech-1,2026-01-03T08:00:00Z,11,content_hidden,technology,c1,video,0,0
+u3,comedy-2,2026-01-04T20:00:00Z,23,content_complete,comedy,c3,video,32000,1

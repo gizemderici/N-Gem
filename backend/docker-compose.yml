@@ -34,6 +34,7 @@ services:
       STORAGE_SECRET_KEY: nexi_dev_storage_password
       STORAGE_BUCKET: nexi-media
       MAX_IMAGE_SIZE_BYTES: 10485760
+      MAX_VIDEO_SIZE_BYTES: 26214400
     ports:
       - "8080:8080"
     depends_on:

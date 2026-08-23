@@ -1,0 +1,31 @@
+{
+  "dataset": "KuaiRand-Pure",
+  "source": "https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz",
+  "archive_md5_expected": "0820331067a3784d9691136f772b35a7",
+  "archive_md5_observed": "0820331067a3784d9691136f772b35a7",
+  "model": "nexi-contextual-v1-offline-equivalent",
+  "protocol": {
+    "split": "per-user chronological last positive event",
+    "sample_users": 1000,
+    "candidate_count": 500,
+    "k": 10,
+    "user_sample": "deterministic SHA-256",
+    "notes": "Static item metadata may be read at target time; user interactions and popularity after target time are excluded."
+  },
+  "standard_policy": {
+    "source_rows": 295497,
+    "evaluated_users": 1000,
+    "catalog_size": 6618,
+    "contextual": {"hit_rate_at_10": 0.142, "mrr_at_10": 0.060472, "ndcg_at_10": 0.079404, "coverage_at_10": 0.424751},
+    "popularity_baseline": {"hit_rate_at_10": 0.255, "mrr_at_10": 0.102844, "ndcg_at_10": 0.138358, "coverage_at_10": 0.040647},
+    "random_baseline": {"hit_rate_at_10": 0.026, "mrr_at_10": 0.006652, "ndcg_at_10": 0.011006, "coverage_at_10": 0.784678}
+  },
+  "random_exposure_policy": {
+    "source_rows": 1186059,
+    "evaluated_users": 1000,
+    "catalog_size": 7583,
+    "contextual": {"hit_rate_at_10": 0.017, "mrr_at_10": 0.006003, "ndcg_at_10": 0.008566, "coverage_at_10": 0.529869},
+    "popularity_baseline": {"hit_rate_at_10": 0.016, "mrr_at_10": 0.004965, "ndcg_at_10": 0.007474, "coverage_at_10": 0.099301},
+    "random_baseline": {"hit_rate_at_10": 0.023, "mrr_at_10": 0.007773, "ndcg_at_10": 0.011283, "coverage_at_10": 0.738362}
+  }
+}

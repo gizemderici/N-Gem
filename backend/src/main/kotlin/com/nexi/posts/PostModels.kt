@@ -62,12 +62,15 @@ data class PostResponse(
     val likedByMe: Boolean,
     val savedByMe: Boolean,
     val createdAt: String,
+    val recommendationReason: String? = null,
 )
 
 @Serializable
 data class FeedResponse(
     val items: List<PostResponse>,
     val nextCursor: String? = null,
+    val requestId: String? = null,
+    val modelVersion: String? = null,
 )
 
 @Serializable

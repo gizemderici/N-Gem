@@ -27,6 +27,7 @@ class MediaServiceTest {
         secretKey = "test",
         bucket = "test",
         maxImageSizeBytes = 10 * 1024 * 1024,
+        maxVideoSizeBytes = 25 * 1024 * 1024,
     )
     private val service = MediaService(repository, storage, config, clock)
     private val ownerId = UUID.randomUUID()
@@ -63,6 +64,21 @@ class MediaServiceTest {
     }
 
     @Test
+    fun `valid mp4 upload becomes ready`() {
+        val signature = byteArrayOf(
+            0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D,
+        )
+        val upload = service.createUpload(ownerId, CreateMediaUploadRequest("demo.mp4", "video/mp4", signature.size.toLong()))
+        val asset = assertNotNull(repository.findById(UUID.fromString(upload.mediaId)))
+        storage.objects[asset.storageKey] = StoredObjectInfo(signature.size.toLong(), "video/mp4", signature)
+
+        val completed = service.completeUpload(ownerId, asset.id)
+
+        assertEquals("READY", completed.status)
+        assertEquals("video/mp4", completed.mimeType)
+    }
+
+    @Test
     fun `another user cannot inspect an upload`() {
         val upload = service.createUpload(ownerId, CreateMediaUploadRequest("photo.jpg", "image/jpeg", 3))
         val error = assertFailsWith<ApiException> {
@@ -74,7 +90,7 @@ class MediaServiceTest {
     @Test
     fun `unsupported types and oversized files are rejected before storage`() {
         assertFailsWith<ApiException> {
-            service.createUpload(ownerId, CreateMediaUploadRequest("video.mp4", "video/mp4", 20))
+            service.createUpload(ownerId, CreateMediaUploadRequest("archive.zip", "application/zip", 20))
         }
         assertFailsWith<ApiException> {
             service.createUpload(

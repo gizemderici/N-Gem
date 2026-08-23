@@ -3,6 +3,7 @@ package com.nexi.posts
 import com.nexi.auth.ApiException
 import com.nexi.auth.MessageResponse
 import com.nexi.auth.authenticatedUserId
+import com.nexi.recommendations.FeedRecommendationContext
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.auth.authenticate
 import io.ktor.server.request.receive
@@ -23,7 +24,24 @@ fun Route.postRoutes(service: PostService) {
             }
             get("/feed") {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
-                call.respond(service.feed(call.authenticatedUserId(), call.request.queryParameters["cursor"], limit))
+                val localHour = call.request.queryParameters["localHour"]?.toIntOrNull()?.coerceIn(0, 23)
+                val timezoneOffset = call.request.queryParameters["timezoneOffsetMinutes"]?.toIntOrNull()?.coerceIn(-840, 840)
+                val sessionId = call.request.queryParameters["sessionId"]?.let { raw ->
+                    runCatching { UUID.fromString(raw) }.getOrNull()
+                }
+                val context = if (localHour != null && timezoneOffset != null && sessionId != null) {
+                    FeedRecommendationContext(localHour, timezoneOffset, sessionId)
+                } else null
+                val personalizationEnabled = call.request.queryParameters["personalized"]?.toBooleanStrictOrNull() ?: true
+                call.respond(
+                    service.feed(
+                        call.authenticatedUserId(),
+                        call.request.queryParameters["cursor"],
+                        limit,
+                        context,
+                        personalizationEnabled,
+                    )
+                )
             }
             get("/{id}") {
                 call.respond(service.get(call.authenticatedUserId(), call.postId()))

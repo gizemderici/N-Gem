@@ -17,6 +17,10 @@ import com.nexi.media.mediaRoutes
 import com.nexi.posts.JdbcPostRepository
 import com.nexi.posts.PostService
 import com.nexi.posts.postRoutes
+import com.nexi.recommendations.ContextualRanker
+import com.nexi.recommendations.JdbcRecommendationRepository
+import com.nexi.recommendations.RecommendationService
+import com.nexi.recommendations.recommendationRoutes
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
@@ -54,7 +58,20 @@ fun Application.module() {
     )
 
     val mediaService = MediaService(JdbcMediaRepository(dataSource), objectStorage, config.storage)
-    val postService = PostService(JdbcPostRepository(dataSource), objectStorage)
+    val postRepository = JdbcPostRepository(dataSource)
+    val recommendationRepository = JdbcRecommendationRepository(dataSource)
+    val ranker = ContextualRanker()
+    val postService = PostService(
+        repository = postRepository,
+        storage = objectStorage,
+        recommendationRepository = recommendationRepository,
+        ranker = ranker,
+    )
+    val recommendationService = RecommendationService(
+        repository = recommendationRepository,
+        postRepository = postRepository,
+        ranker = ranker,
+    )
 
     monitor.subscribe(ApplicationStopped) {
         objectStorage.close()
@@ -73,6 +90,8 @@ fun Application.module() {
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Patch)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
         allowHeader(HttpHeaders.Authorization)
         allowHeader(HttpHeaders.ContentType)
         if (!config.isProduction) anyHost()
@@ -113,5 +132,6 @@ fun Application.module() {
         authRoutes(authService, RequestRateLimiter())
         mediaRoutes(mediaService)
         postRoutes(postService)
+        recommendationRoutes(recommendationService)
     }
 }
