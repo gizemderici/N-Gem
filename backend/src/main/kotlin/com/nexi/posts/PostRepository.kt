@@ -48,7 +48,18 @@ interface PostRepository {
     fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): List<String>?
     fun setLike(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long
     fun setSave(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long
+
+    /** Metin araması; alaka sırasına göre. */
+    fun search(viewerId: UUID, query: String, cursor: RankedPostCursor?, limit: Int): List<RankedPost>
+
+    /** Keşfet: sorgu yok, popülerlik ve güncellik karışımı. */
+    fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost>
 }
+
+/** Sıralama puanıyla birlikte bir gönderi. */
+data class RankedPost(val details: PostDetails, val rank: Double)
+
+data class RankedPostCursor(val rank: Double, val createdAt: Instant, val id: UUID)
 
 class MediaOwnershipException : RuntimeException()
 class MediaAlreadyAttachedException : RuntimeException()
@@ -62,6 +73,9 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
          * yorum sayacındaki engel süzgeci (2), beğeni, kayıt ve takip kontrolü.
          */
         const val VIEWER_BINDINGS = 3 + BlockFilter.BINDINGS
+
+        /** Keşfet puanının yarılanma süresi: bir haftalık içerik puanının yarısını yitirir. */
+        const val HALF_LIFE_SECONDS = 604_800.0
     }
 
     override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, topicIds: List<UUID>, now: Instant): Post {
@@ -394,8 +408,87 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         }
     }
 
-    private fun detailsSelect() =
-        """SELECT p.id, p.owner_id, p.body, p.status, p.created_at, p.updated_at,
+    /**
+     * Alaka sıralı sorgular ortak bir iskelet kullanıyor: iç sorgu puanı
+     * hesaplıyor, dış sorgu imleci uyguluyor. Puanı `WHERE` içinde tekrar
+     * hesaplamak yerine sarmalamak hem okunur hem de ifadeyi bir kez yazdırıyor.
+     */
+    private fun rankedQuery(rankExpression: String, filter: String, cursor: RankedPostCursor?): String {
+        val cursorClause = if (cursor == null) "" else "WHERE (rank, created_at, id) < (?, ?, ?)"
+        return """SELECT * FROM (
+                    SELECT ${detailsColumns()}, $rankExpression AS rank
+                    ${detailsFrom()}
+                    WHERE $filter
+                  ) ranked
+                  $cursorClause
+                  ORDER BY rank DESC, created_at DESC, id DESC LIMIT ?"""
+    }
+
+    override fun search(viewerId: UUID, query: String, cursor: RankedPostCursor?, limit: Int): List<RankedPost> =
+        dataSource.connection.use { connection ->
+            val sql = rankedQuery(
+                rankExpression = "ts_rank(p.search_vector, websearch_to_tsquery('turkish_simple', ?))",
+                filter = "p.status = 'PUBLISHED' " +
+                    "AND p.search_vector @@ websearch_to_tsquery('turkish_simple', ?) " +
+                    "AND ${BlockFilter.notBlocked("p.owner_id")}",
+                cursor = cursor,
+            )
+            connection.prepareStatement(sql).use { statement ->
+                var index = 1
+                repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
+                statement.setString(index++, query)   // ts_rank
+                statement.setString(index++, query)   // @@ eşleşmesi
+                repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
+                if (cursor != null) {
+                    statement.setDouble(index++, cursor.rank)
+                    statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
+                    statement.setObject(index++, cursor.id)
+                }
+                statement.setInt(index, limit)
+                statement.executeQuery().use { results ->
+                    buildList { while (results.next()) add(RankedPost(results.toDetails(), results.getDouble("rank"))) }
+                }
+            }
+        }
+
+    override fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost> =
+        dataSource.connection.use { connection ->
+            // Etkileşim logaritmik ağırlıklı: bir gönderinin 1000 yerine 2000
+            // beğeni alması sırayı iki katına çıkarmasın. Güncellik üstel
+            // sönümlemeyle giriyor; bir haftalık içerik puanının yarısını yitiriyor.
+            val sql = rankedQuery(
+                rankExpression = """
+                    ln(1 + (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)
+                          + (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id AND c.status = 'PUBLISHED'))
+                    * exp(-EXTRACT(EPOCH FROM (now() - p.created_at)) / $HALF_LIFE_SECONDS)
+                """.trimIndent(),
+                filter = "p.status = 'PUBLISHED' AND ${BlockFilter.notBlocked("p.owner_id")}",
+                cursor = cursor,
+            )
+            connection.prepareStatement(sql).use { statement ->
+                var index = 1
+                repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
+                repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
+                if (cursor != null) {
+                    statement.setDouble(index++, cursor.rank)
+                    statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
+                    statement.setObject(index++, cursor.id)
+                }
+                statement.setInt(index, limit)
+                statement.executeQuery().use { results ->
+                    buildList { while (results.next()) add(RankedPost(results.toDetails(), results.getDouble("rank"))) }
+                }
+            }
+        }
+
+    private fun detailsSelect() = "SELECT ${detailsColumns()} ${detailsFrom()}"
+
+    /**
+     * Sütunlar ve `FROM` ayrı duruyor ki arama sorguları araya bir sıralama
+     * sütunu (`ts_rank`) ekleyebilsin.
+     */
+    private fun detailsColumns() =
+        """p.id, p.owner_id, p.body, p.status, p.created_at, p.updated_at,
                   u.full_name, u.username,
                   (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id) AS like_count,
                   (SELECT COUNT(*) FROM post_saves ps WHERE ps.post_id = p.id) AS save_count,
@@ -405,8 +498,10 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                   EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = ?) AS liked_by_viewer,
                   EXISTS(SELECT 1 FROM post_saves ps WHERE ps.post_id = p.id AND ps.user_id = ?) AS saved_by_viewer,
                   EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id) AS author_followed,
-                  am.storage_key AS author_avatar_key
-           FROM posts p
+                  am.storage_key AS author_avatar_key"""
+
+    private fun detailsFrom() =
+        """FROM posts p
            JOIN users u ON u.id = p.owner_id
            LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'"""
 

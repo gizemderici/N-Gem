@@ -124,6 +124,47 @@ internal class InMemoryPostRepository(
         return saves.count { it.first == postId }.toLong()
     }
 
+    /**
+     * Bellek içi arama: gerçek tam metin yerine basit içerme kontrolü.
+     * Türkçe normalizasyonu kabaca taklit ediyor ki testler aynı davranışı görsün.
+     */
+    override fun search(viewerId: UUID, query: String, cursor: RankedPostCursor?, limit: Int): List<RankedPost> {
+        val needle = normalizeText(query)
+        return published()
+            .filter { normalizeText(it.body).contains(needle) }
+            .map { RankedPost(details(it, viewerId), 1.0) }
+            .afterRankedCursor(cursor)
+            .take(limit)
+    }
+
+    override fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost> = published()
+        .map { post ->
+            val likeCount = likes.count { it.first == post.id }
+            RankedPost(details(post, viewerId), kotlin.math.ln(1.0 + likeCount))
+        }
+        .afterRankedCursor(cursor)
+        .take(limit)
+
+    private fun List<RankedPost>.afterRankedCursor(cursor: RankedPostCursor?): List<RankedPost> = this
+        .sortedWith(
+            compareByDescending<RankedPost> { it.rank }
+                .thenByDescending { it.details.post.createdAt }
+                .thenByDescending { it.details.post.id }
+        )
+        .filter { item ->
+            val post = item.details.post
+            cursor == null ||
+                item.rank < cursor.rank ||
+                (item.rank == cursor.rank && post.createdAt < cursor.createdAt) ||
+                (item.rank == cursor.rank && post.createdAt == cursor.createdAt && post.id < cursor.id)
+        }
+
+    /** Aksanları düzleyip küçük harfe indiriyor; `unaccent` + `lower` karşılığı. */
+    private fun normalizeText(text: String) = text.lowercase()
+        .replace(Regex("[ıİ]"), "i")
+        .replace("ş", "s").replace("ğ", "g")
+        .replace("ü", "u").replace("ö", "o").replace("ç", "c")
+
     /** JdbcPostRepository'deki dışlayıcı katman koşullarının bellek içi karşılığı. */
     private fun tierOf(
         topicIds: List<UUID>,

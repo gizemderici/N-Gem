@@ -54,10 +54,10 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 127 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 139 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
-takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, bildirimler, engelleme/şikâyet ve öneri olayları.
+takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, bildirimler, arama/keşfet, engelleme/şikâyet ve öneri olayları.
 
 ```bash
 docker compose up -d --build
@@ -496,6 +496,60 @@ yok oluyor ve takip grafiği sınırlı; yine de sorgunun büyümemesi için tav
 `processing_status` ikisi de `READY`) ve kullanıcıya ait olması gerekir. Bir
 medya yalnızca tek bir yerde kullanılabilir: gönderide kullanılan hikâyeye,
 hikâyede kullanılan başka bir hikâyeye eklenemez (`MEDIA_ALREADY_ATTACHED`).
+
+## Arama ve Keşfet
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/api/v1/search?q=…` | Birleşik: kullanıcı, gönderi ve konuların ilk 5'i |
+| `GET` | `/api/v1/search/users?q=…` | Kullanıcılar, imleçli |
+| `GET` | `/api/v1/search/posts?q=…` | Gönderiler, imleçli |
+| `GET` | `/api/v1/explore` | Sorgu almaz; popülerlik + güncellik |
+
+### Türkçe arama
+
+PostgreSQL'in hazır Türkçe sözlüğü yok. `unaccent` üzerine `turkish_simple`
+adında bir yapılandırma kuruldu; aksan duyarsız, kök bulmasız eşleşme sağlıyor:
+
+| Yazılan | Bulduğu |
+|---|---|
+| `yazilim` | "Yazılım" |
+| `CICEK` | "çiçek" |
+| `istanbul` | "İSTANBUL" |
+| `gelistirme` | "geliştirme" |
+
+**Sınırı açık olsun: kök bulma yok.** "kitaplar" araması "kitap" içeren gönderiyi
+bulmaz. Bunun için hunspell Türkçe sözlüğünün imaja eklenmesi gerekiyor; sonraki
+adıma bırakıldı.
+
+Etiketler (`#kotlin`) ayrıştırıcı `#`'i attığı için normal kelime olarak
+indeksleniyor — ayrı bir hashtag tablosuna gerek kalmadı.
+
+Kullanıcı araması iki yoldan eşleşiyor: tam kelime (`tsvector`) ve kullanıcı
+adında parça (`pg_trgm`). İkincisi olmadan "giz" yazınca "gizem" bulunamaz ve
+yazarken arama deneyimi bozulurdu.
+
+### Sıralama ve sayfalama
+
+Arama alaka puanına, keşfet ise etkileşim ve güncellik karışımına göre sıralanır:
+
+```
+puan = ln(1 + beğeni + yorum) × exp(-yaş / 1 hafta)
+```
+
+Etkileşim logaritmik: 1000 yerine 2000 beğeni almak sırayı iki katına çıkarmıyor.
+
+İmleç `(puan, createdAt, id)` üçlüsünü taşır. **Puan tam yazılmalı** — sabit
+ondalıkla yuvarlamak sessiz bir tekrar hatasına yol açıyordu: yuvarlama yukarı
+gittiğinde imleçteki puan gerçek puandan büyük kalıyor ve aynı gönderi bir
+sonraki sayfada ikinci kez çıkıyordu. `Double.toString` tam dönüşlü gösterim verir.
+
+### Sınırlar
+
+- Boş sorgu `EMPTY_QUERY`, 100 karakterden uzun sorgu `QUERY_TOO_LONG` ile reddedilir.
+- Arama uçları kullanıcı başına dakikada 30 istekle sınırlı; tam metin sorguları
+  diğer uçlardan pahalı.
+- Silinmiş gönderiler ve engellenen kullanıcıların içeriği sonuçlarda görünmez.
 
 ## Bildirimler
 

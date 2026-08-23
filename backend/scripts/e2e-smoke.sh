@@ -569,6 +569,56 @@ printf '%s' "$DELN" | grep -q "silindi" && ok "bildirim silindi" || bad "bildiri
 OTHERDEL=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/notifications/$NID")
 [ "$(printf '%s' "$OTHERDEL" | field code)" = "NOTIFICATION_NOT_FOUND" ] && ok "baskasinin bildirimi silinemiyor" || bad "bildirim yetkisi" "$OTHERDEL"
 
+# ------------------------------------------------------- 11e) Arama ve kesfet
+step "11e) Arama ve kesfet"
+
+# Turkce karakterli gonderi. Kabuk UTF-8'i guvenilir tasimadigi icin govde
+# acik bayt kacislariyla yaziliyor; dogrulama da metin yerine kimlik uzerinden.
+#   \xc4\xb1 = i(noktasiz)   \xc5\x9f = s(cedilli)   \xc4\x9f = g(yumusak)
+#   \xc3\xbc = u(umlaut)     \xc3\xa7 = c(cedilli)
+TRBODY=/tmp/e2e_tr.json
+printf '{"text":"Yaz\xc4\xb1l\xc4\xb1m geli\xc5\x9ftirme \xc3\xbczerine #kotlin ve \xc3\xa7i\xc3\xa7ek bah\xc3\xa7esi"}' > "$TRBODY"
+TRPOST=$(ca "$TOK_A" -X POST "$BASE/api/v1/posts" -H 'Content-Type: application/json' --data-binary "@$TRBODY")
+TRID=$(printf '%s' "$TRPOST" | field id)
+[ -n "$TRID" ] && ok "Turkce karakterli gonderi olusturuldu" || bad "Turkce gonderi" "$TRPOST"
+
+SRCH=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=yazilim")
+printf '%s' "$SRCH" | grep -q "$TRID" && ok "aksansiz sorgu Turkce metni buldu (yazilim)" || bad "Turkce normalizasyon" "$SRCH"
+
+SRCH2=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=CICEK")
+printf '%s' "$SRCH2" | grep -q "$TRID" && ok "buyuk harf + aksansiz eslesme (CICEK)" || bad "buyuk harf normalizasyon" "$SRCH2"
+
+SRCH2B=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=gelistirme")
+printf '%s' "$SRCH2B" | grep -q "$TRID" && ok "yumusak g ve cedilli s normalize edildi" || bad "gelistirme" "$SRCH2B"
+
+SRCH3=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=kotlin")
+printf '%s' "$SRCH3" | grep -q "kotlin" && ok "hashtag arandi (ayri tablo olmadan)" || bad "hashtag aramasi" "$SRCH3"
+
+USRCH=$(ca "$TOK_A" "$BASE/api/v1/search/users?q=$USER_B")
+printf '%s' "$USRCH" | grep -q "$USER_B" && ok "kullanici arandi" || bad "kullanici aramasi" "$USRCH"
+
+PARTIAL=$(ca "$TOK_A" "$BASE/api/v1/search/users?q=$(printf '%s' "$USER_B" | cut -c1-6)")
+printf '%s' "$PARTIAL" | grep -q "$USER_B" && ok "parcali kullanici adi eslesti" || bad "parcali arama" "$PARTIAL"
+
+ALLS=$(ca "$TOK_A" "$BASE/api/v1/search?q=kotlin")
+printf '%s' "$ALLS" | grep -q '"users"' && printf '%s' "$ALLS" | grep -q '"posts"' && printf '%s' "$ALLS" | grep -q '"topics"' \
+  && ok "birlesik arama uc bolum dondu" || bad "birlesik arama" "$(printf '%s' "$ALLS" | head -c 200)"
+
+EMPTYQ=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=")
+[ "$(printf '%s' "$EMPTYQ" | field code)" = "EMPTY_QUERY" ] && ok "bos sorgu reddedildi" || bad "EMPTY_QUERY" "$EMPTYQ"
+
+LONGQ=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=$(head -c 150 /dev/zero | tr '\0' 'a')")
+[ "$(printf '%s' "$LONGQ" | field code)" = "QUERY_TOO_LONG" ] && ok "asiri uzun sorgu reddedildi" || bad "QUERY_TOO_LONG" "$LONGQ"
+
+EXPL=$(ca "$TOK_A" "$BASE/api/v1/explore?limit=5")
+printf '%s' "$EXPL" | grep -q '"items"' && ok "kesfet sorgu almadan calisti" || bad "kesfet" "$EXPL"
+
+# Engellenen kullanicinin gonderisi aramada cikmamali
+ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/block" >/dev/null
+BSRCH=$(ca "$TOK_A" "$BASE/api/v1/search/posts?q=kullanicisinin")
+printf '%s' "$BSRCH" | grep -q "$PID_B" && bad "engellenenin gonderisi aramada" "$BSRCH" || ok "engellenen aramadan cikarildi"
+ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/block" >/dev/null
+
 # ---------------------------------------------------------------- Gonderi silme
 step "12) Gonderi silme ve medya serbest birakma"
 DELP=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/posts/$PID_A")

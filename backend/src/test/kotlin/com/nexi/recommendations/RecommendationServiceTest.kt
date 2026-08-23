@@ -6,6 +6,8 @@ import com.nexi.posts.FeedTier
 import com.nexi.posts.Post
 import com.nexi.posts.PostDetails
 import com.nexi.posts.PostRepository
+import com.nexi.posts.RankedPost
+import com.nexi.posts.RankedPostCursor
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -137,6 +139,13 @@ private object EmptyPostRepository : PostRepository {
     override fun markDeleted(postId: UUID, ownerId: UUID, now: Instant): List<String>? = unsupported()
     override fun setLike(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long = unsupported()
     override fun setSave(postId: UUID, userId: UUID, active: Boolean, now: Instant): Long = unsupported()
+    override fun search(
+        viewerId: UUID,
+        query: String,
+        cursor: RankedPostCursor?,
+        limit: Int,
+    ): List<RankedPost> = unsupported()
+    override fun explore(viewerId: UUID, cursor: RankedPostCursor?, limit: Int): List<RankedPost> = unsupported()
 }
 
 private fun <T> unsupported(): T = throw UnsupportedOperationException("Testte kullanılmıyor")

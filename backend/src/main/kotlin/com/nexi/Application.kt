@@ -7,6 +7,7 @@ import com.nexi.auth.ErrorResponse
 import com.nexi.auth.JdbcAuthRepository
 import com.nexi.auth.PasswordHasher
 import com.nexi.auth.TokenService
+import com.nexi.auth.RequestRateLimiter
 import com.nexi.auth.authRoutes
 import com.nexi.comments.CommentService
 import com.nexi.comments.JdbcCommentRepository
@@ -43,6 +44,9 @@ import com.nexi.stories.JdbcStoryRepository
 import com.nexi.stories.StoryJanitor
 import com.nexi.stories.StoryService
 import com.nexi.stories.storyRoutes
+import com.nexi.search.JdbcSearchRepository
+import com.nexi.search.SearchService
+import com.nexi.search.searchRoutes
 import com.nexi.topics.JdbcTopicRepository
 import com.nexi.topics.TopicService
 import com.nexi.topics.topicRoutes
@@ -131,6 +135,7 @@ fun Application.module() {
         users = { username -> profileRepository.findIdByUsername(username) },
         storage = objectStorage,
     )
+    val searchService = SearchService(postRepository, JdbcSearchRepository(dataSource), objectStorage)
     val topicService = TopicService(topicRepository)
     val feedService = FeedService(postRepository, topicRepository, objectStorage)
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
@@ -236,6 +241,8 @@ fun Application.module() {
         storyRoutes(storyService)
         messagingRoutes(messagingService)
         notificationRoutes(notificationService)
+        // Arama sorgulari pahali; dakikada 30 istekle sinirli.
+        searchRoutes(searchService, RequestRateLimiter(maximumAttempts = 30))
         topicRoutes(topicService)
         feedRoutes(feedService)
     }
