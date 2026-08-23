@@ -1,5 +1,6 @@
 package com.nexi.profiles
 
+import com.nexi.moderation.BlockFilter
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
@@ -52,10 +53,13 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
                           EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = u.id) AS followed_by_viewer
                    FROM users u
                    LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'
-                   WHERE u.username_normalized = ?"""
+                   WHERE u.username_normalized = ? AND ${BlockFilter.notBlocked("u.id")}"""
             ).use { statement ->
                 statement.setObject(1, viewerId)
                 statement.setString(2, username.lowercase())
+                // Engellenmiş kullanıcı profili hiç yokmuş gibi davranıyor.
+                statement.setObject(3, viewerId)
+                statement.setObject(4, viewerId)
                 statement.executeQuery().use { results ->
                     if (!results.next()) return@use null
                     val id = results.getObject("id", UUID::class.java)
@@ -217,12 +221,13 @@ class JdbcProfileRepository(private val dataSource: DataSource) : ProfileReposit
                FROM follows f
                JOIN users u ON u.id = $joinColumn
                LEFT JOIN media_assets am ON am.id = u.avatar_media_id AND am.status = 'READY'
-               WHERE $filterColumn = ? $cursorClause
+               WHERE $filterColumn = ? AND ${BlockFilter.notBlocked("u.id")} $cursorClause
                ORDER BY f.created_at DESC, u.id DESC LIMIT ?"""
         ).use { statement ->
             var index = 1
             statement.setObject(index++, viewerId)
             statement.setObject(index++, userId)
+            repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
             if (cursor != null) {
                 statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
                 statement.setObject(index++, cursor.userId)

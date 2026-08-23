@@ -81,6 +81,8 @@ class ProfileService(
      * göndermek hata değil, sonuç aynı kalır.
      */
     fun setFollow(followerId: UUID, username: String, active: Boolean): FollowResponse {
+        // Engelli kullanıcı `findByUsername` sorgusundan zaten dönmüyor; takip
+        // etmeye çalışmak "böyle bir kullanıcı yok" cevabı alır.
         val target = repository.findByUsername(username, followerId) ?: throw userNotFound()
         if (target.id == followerId) {
             throw validation("CANNOT_FOLLOW_SELF", "Kendini takip edemezsin.", "username")

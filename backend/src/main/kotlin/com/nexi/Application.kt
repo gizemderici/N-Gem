@@ -18,6 +18,9 @@ import com.nexi.feed.feedRoutes
 import com.nexi.media.JdbcMediaRepository
 import com.nexi.media.MediaJanitor
 import com.nexi.media.MediaService
+import com.nexi.moderation.JdbcModerationRepository
+import com.nexi.moderation.ModerationService
+import com.nexi.moderation.moderationRoutes
 import com.nexi.media.S3ObjectStorage
 import com.nexi.media.mediaRoutes
 import com.nexi.posts.JdbcPostRepository
@@ -95,7 +98,13 @@ fun Application.module() {
         ranker = ranker,
     )
     val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage)
-    val profileService = ProfileService(JdbcProfileRepository(dataSource), objectStorage)
+    val profileRepository = JdbcProfileRepository(dataSource)
+    val profileService = ProfileService(profileRepository, objectStorage)
+    val moderationService = ModerationService(
+        repository = JdbcModerationRepository(dataSource),
+        users = { username -> profileRepository.findIdByUsername(username) },
+        storage = objectStorage,
+    )
     val topicService = TopicService(topicRepository)
     val feedService = FeedService(postRepository, topicRepository, objectStorage)
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
@@ -190,6 +199,7 @@ fun Application.module() {
         // Profil yolları `/users/{username}` desenini kullanıyor; `/users/me`
         // literal olduğu için ondan önce eşleşir, çakışma yok.
         profileRoutes(profileService, postService)
+        moderationRoutes(moderationService)
         topicRoutes(topicService)
         feedRoutes(feedService)
     }

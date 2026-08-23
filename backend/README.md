@@ -54,10 +54,10 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 71 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 86 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
-takip, takip içeriğinin akışa girmesi, avatar/biyografi ve öneri olayları.
+takip, takip içeriğinin akışa girmesi, avatar/biyografi, engelleme/şikâyet ve öneri olayları.
 
 ```bash
 docker compose up -d --build
@@ -450,6 +450,55 @@ takipçi ve takip listeleri. Bildirim ve mesaj cevapları henüz yok (Faz 11–1
 
 Depolama anahtarı hiçbir zaman dışarı çıkmaz; imzalı adres servis katmanında
 üretilir (`AvatarUrls`).
+
+## Engelleme ve şikâyet
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `PUT` | `/api/v1/users/{username}/block` | Engeller; tekrar çağrılması güvenlidir |
+| `DELETE` | `/api/v1/users/{username}/block` | Engeli kaldırır |
+| `GET` | `/api/v1/users/me/blocked` | Engellediklerin, imleçli |
+| `POST` | `/api/v1/reports` | Şikâyet oluşturur |
+| `GET` | `/api/v1/users/me/reports` | Kendi şikâyetlerin, imleçli |
+
+### Engelleme çift yönlüdür
+
+Kayıt tek yönlü tutulur (kim kimi engelledi) ama **etki çift yönlüdür**: A, B'yi
+engellediyse B de A'nın içeriğini görmez. Ortak koşul `BlockFilter.notBlocked`
+içinde tek yerde tanımlı ve şu sorguların hepsine uygulanır:
+
+- Kişiselleştirilmiş akış ve katmanları
+- Kronolojik akış
+- Tek gönderi (`GET /posts/{id}` → `POST_NOT_FOUND`)
+- Kullanıcının gönderi listesi
+- Profil (`GET /users/{username}` → `USER_NOT_FOUND`)
+- Takipçi ve takip listeleri
+- Yorum listesi **ve yorum sayacı**
+
+Sayaç da süzülüyor; aksi halde "3 yorum" deyip iki tane gösterirdik.
+
+Engelleme anında iki kullanıcı arasındaki takip ilişkisi **her iki yönde de**
+silinir. Engel kaldırıldığında takip kendiliğinden geri gelmez.
+
+Engellenmiş kullanıcı profil sorgusundan hiç dönmediği için onu takip etmeye
+çalışmak da `USER_NOT_FOUND` alır — ayrı bir kontrol gerekmiyor.
+
+### Şikâyetler
+
+Hedef türleri: `USER`, `POST`, `COMMENT`, `STORY`, `MESSAGE`. Hikâye ve mesaj
+henüz olmadığı için `UNSUPPORTED_REPORT_TARGET` ile reddedilir.
+
+Nedenler: `SPAM`, `HARASSMENT`, `HATE_SPEECH`, `VIOLENCE`, `NUDITY`,
+`SELF_HARM`, `MISINFORMATION`, `OTHER`. Tür ve neden büyük/küçük harfe duyarsız.
+
+Durumlar: `OPEN → REVIEWING → ACTIONED / DISMISSED`. `reports.status` en son
+durumu, `report_events` ise kim ne zaman ne yaptığını tutar.
+
+Aynı kişi aynı hedefi ikinci kez şikâyet ederse yeni kayıt oluşmaz: mevcut kayıt
+`alreadyReported: true` ve `200` ile döner (ilk şikâyet `201`).
+
+Moderatör uçları bu fazın kapsamı dışında; `report_events` tablosu onlar
+eklendiğinde denetim izini hazır bulacak.
 
 ### Akıştaki takip katmanı
 

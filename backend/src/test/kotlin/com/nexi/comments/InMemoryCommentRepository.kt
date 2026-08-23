@@ -36,7 +36,7 @@ internal class InMemoryCommentRepository(private val baseTime: Instant) : Commen
         .take(limit)
         .map(::details)
 
-    override fun countForPost(postId: UUID): Long = comments.values
+    override fun countForPost(postId: UUID, viewerId: UUID): Long = comments.values
         .count { it.postId == postId && it.status == CommentStatus.PUBLISHED }
         .toLong()
 

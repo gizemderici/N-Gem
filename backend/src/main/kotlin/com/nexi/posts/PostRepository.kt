@@ -1,6 +1,7 @@
 package com.nexi.posts
 
 import com.nexi.media.MediaAsset
+import com.nexi.moderation.BlockFilter
 import com.nexi.media.MediaStatus
 import com.nexi.topics.Topic
 import com.nexi.topics.toTopic
@@ -56,8 +57,11 @@ class UnknownTopicException : RuntimeException()
 class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
 
     private companion object {
-        /** `detailsSelect` içinde viewerId'nin kaç kez bağlandığı: beğeni, kayıt, takip. */
-        const val VIEWER_BINDINGS = 3
+        /**
+         * `detailsSelect` içinde viewerId'nin kaç kez bağlandığı:
+         * yorum sayacındaki engel süzgeci (2), beğeni, kayıt ve takip kontrolü.
+         */
+        const val VIEWER_BINDINGS = 3 + BlockFilter.BINDINGS
     }
 
     override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, topicIds: List<UUID>, now: Instant): Post {
@@ -111,11 +115,13 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
     }
 
     override fun findDetails(postId: UUID, viewerId: UUID): PostDetails? = dataSource.connection.use { connection ->
-        val details = connection.prepareStatement("${detailsSelect()} WHERE p.id = ? AND p.status = 'PUBLISHED'").use { statement ->
-            statement.setObject(1, viewerId)
-            statement.setObject(2, viewerId)
-            statement.setObject(3, viewerId)
-            statement.setObject(4, postId)
+        val details = connection.prepareStatement(
+            "${detailsSelect()} WHERE p.id = ? AND p.status = 'PUBLISHED' AND ${BlockFilter.notBlocked("p.owner_id")}"
+        ).use { statement ->
+            var index = 1
+            repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
+            statement.setObject(index++, postId)
+            repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
             statement.executeQuery().use { results ->
                 if (results.next()) results.toDetails() else null
             }
@@ -127,11 +133,12 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         dataSource.connection.use { connection ->
             val cursorClause = if (cursor == null) "" else "AND (p.created_at, p.id) < (?, ?)"
             connection.prepareStatement(
-                "${detailsSelect()} WHERE p.status = 'PUBLISHED' $cursorClause ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
+                "${detailsSelect()} WHERE p.status = 'PUBLISHED' AND ${BlockFilter.notBlocked("p.owner_id")} " +
+                    "$cursorClause ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
             ).use { statement ->
                 var index = 1
-                // detailsSelect üç kez viewerId bekliyor: beğeni, kayıt ve takip kontrolü.
                 repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
+                repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
                 if (cursor != null) {
                     statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
                     statement.setObject(index++, cursor.id)
@@ -148,12 +155,14 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         dataSource.connection.use { connection ->
             val cursorClause = if (cursor == null) "" else "AND (p.created_at, p.id) < (?, ?)"
             connection.prepareStatement(
-                "${detailsSelect()} WHERE p.owner_id = ? AND p.status = 'PUBLISHED' $cursorClause " +
+                "${detailsSelect()} WHERE p.owner_id = ? AND p.status = 'PUBLISHED' " +
+                    "AND ${BlockFilter.notBlocked("p.owner_id")} $cursorClause " +
                     "ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
             ).use { statement ->
                 var index = 1
                 repeat(VIEWER_BINDINGS) { statement.setObject(index++, viewerId) }
                 statement.setObject(index++, ownerId)
+                repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
                 if (cursor != null) {
                     statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
                     statement.setObject(index++, cursor.id)
@@ -174,6 +183,9 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         limit: Int,
     ): List<PostDetails> = dataSource.connection.use { connection ->
         val bindings = MutableList<Any>(VIEWER_BINDINGS) { viewerId }
+        // Engel süzgeci tier koşulundan önce geliyor; SQL'deki sıra da öyle.
+        val blockClause = BlockFilter.notBlocked("p.owner_id")
+        repeat(BlockFilter.BINDINGS) { bindings += viewerId }
         val tierClause = tierClause(tier, viewerId, priorityTopicCount, bindings)
         val cursorClause = if (cursor == null) {
             ""
@@ -185,7 +197,7 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
         bindings += limit
 
         connection.prepareStatement(
-            "${detailsSelect()} WHERE p.status = 'PUBLISHED' AND $tierClause $cursorClause " +
+            "${detailsSelect()} WHERE p.status = 'PUBLISHED' AND $blockClause AND $tierClause $cursorClause " +
                 "ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
         ).use { statement ->
             bindings.forEachIndexed { index, value ->
@@ -387,7 +399,9 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
                   u.full_name, u.username,
                   (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id) AS like_count,
                   (SELECT COUNT(*) FROM post_saves ps WHERE ps.post_id = p.id) AS save_count,
-                  (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id AND c.status = 'PUBLISHED') AS comment_count,
+                  (SELECT COUNT(*) FROM comments c
+                    WHERE c.post_id = p.id AND c.status = 'PUBLISHED'
+                      AND ${BlockFilter.notBlocked("c.author_id")}) AS comment_count,
                   EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = ?) AS liked_by_viewer,
                   EXISTS(SELECT 1 FROM post_saves ps WHERE ps.post_id = p.id AND ps.user_id = ?) AS saved_by_viewer,
                   EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id) AS author_followed,

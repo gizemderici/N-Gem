@@ -51,7 +51,7 @@ class CommentService(
         return CommentPageResponse(
             items = items.map { it.toResponse(storage, deletableByMe = canDelete(viewerId, it.comment.authorId, postOwnerId)) },
             nextCursor = nextCursor,
-            totalCount = repository.countForPost(postId),
+            totalCount = repository.countForPost(postId, viewerId),
         )
     }
 

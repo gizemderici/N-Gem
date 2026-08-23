@@ -325,6 +325,70 @@ BADID=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Ty
 RP=$(ca "$TOK_A" "$BASE/api/v1/recommendations/profile?localHour=14")
 printf '%s' "$RP" | grep -q '"eventCount"' && ok "oneri profili okundu" || bad "oneri profili" "$RP"
 
+# ------------------------------------------------------- 11b) Engelleme ve sikayet
+step "11b) Engelleme ve sikayet"
+
+# Once A, B'yi takip etsin ki engellemenin takibi kaldirdigini gorebilelim.
+ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/follow" >/dev/null
+ca "$TOK_B" -X PUT "$BASE/api/v1/users/$USER_A/follow" >/dev/null
+# B'nin gonderisine A yorum yazsin; engellenince B'nin sayaci dusmeli.
+ca "$TOK_A" -X POST "$BASE/api/v1/posts/$PID_B/comments" -H 'Content-Type: application/json' \
+  -d '{"text":"Engellemeden onceki yorum"}' >/dev/null
+BEFORE_CNT=$(ca "$TOK_B" "$BASE/api/v1/posts/$PID_B/comments" | num totalCount)
+
+# --- Sikayet ---
+REP=$(ca "$TOK_A" -X POST "$BASE/api/v1/reports" -H 'Content-Type: application/json' \
+  -d "{\"targetType\":\"POST\",\"targetId\":\"$PID_B\",\"reason\":\"SPAM\",\"details\":\"E2E sikayet\"}")
+[ "$(printf '%s' "$REP" | field status)" = "OPEN" ] && ok "gonderi sikayet edildi" || bad "sikayet" "$REP"
+
+REP2=$(ca "$TOK_A" -X POST "$BASE/api/v1/reports" -H 'Content-Type: application/json' \
+  -d "{\"targetType\":\"POST\",\"targetId\":\"$PID_B\",\"reason\":\"HARASSMENT\"}")
+[ "$(printf '%s' "$REP2" | boolf alreadyReported)" = "true" ] && ok "ayni hedef ikinci kez sikayet edilmedi" || bad "tekrar sikayet" "$REP2"
+
+STORYREP=$(ca "$TOK_A" -X POST "$BASE/api/v1/reports" -H 'Content-Type: application/json' \
+  -d "{\"targetType\":\"STORY\",\"targetId\":\"$PID_B\",\"reason\":\"SPAM\"}")
+[ "$(printf '%s' "$STORYREP" | field code)" = "UNSUPPORTED_REPORT_TARGET" ] && ok "hikaye sikayeti henuz desteklenmiyor" || bad "STORY sikayeti" "$STORYREP"
+
+MYREP=$(ca "$TOK_A" "$BASE/api/v1/users/me/reports")
+[ "$(printf '%s' "$MYREP" | num totalCount)" -ge 1 ] && ok "kendi sikayetlerim listelendi" || bad "sikayet listesi" "$MYREP"
+
+# --- Engelleme ---
+BLK=$(ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/block")
+[ "$(printf '%s' "$BLK" | boolf blocked)" = "true" ] && ok "kullanici engellendi" || bad "engelleme" "$BLK"
+
+SELFBLK=$(ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_A/block")
+[ "$(printf '%s' "$SELFBLK" | field code)" = "CANNOT_BLOCK_SELF" ] && ok "kendini engelleme reddedildi" || bad "CANNOT_BLOCK_SELF" "$SELFBLK"
+
+BLIST=$(ca "$TOK_A" "$BASE/api/v1/users/me/blocked")
+printf '%s' "$BLIST" | grep -q "$USER_B" && ok "engellenenler listesinde" || bad "engellenenler listesi" "$BLIST"
+
+# Profil artik gorunmemeli - iki yonlu
+PROFBLK=$(ca "$TOK_A" "$BASE/api/v1/users/$USER_B")
+[ "$(printf '%s' "$PROFBLK" | field code)" = "USER_NOT_FOUND" ] && ok "engellenen profil gorunmuyor" || bad "profil engeli" "$PROFBLK"
+PROFREV=$(ca "$TOK_B" "$BASE/api/v1/users/$USER_A")
+[ "$(printf '%s' "$PROFREV" | field code)" = "USER_NOT_FOUND" ] && ok "engel cift yonlu: karsi taraf da goremiyor" || bad "cift yonlu engel" "$PROFREV"
+
+# Takip iliskisi kalkmali
+FLWAFTER=$(ca "$TOK_B" "$BASE/api/v1/users/$USER_B/followers")
+printf '%s' "$FLWAFTER" | grep -q "$USER_A" && bad "engelleme takibi kaldirmali" "$FLWAFTER" || ok "karsilikli takip kaldirildi"
+
+# Gonderi ve akis
+POSTBLK=$(ca "$TOK_A" "$BASE/api/v1/posts/$PID_B")
+[ "$(printf '%s' "$POSTBLK" | field code)" = "POST_NOT_FOUND" ] && ok "engellenenin gonderisi acilmyor" || bad "gonderi engeli" "$POSTBLK"
+
+FEEDBLK=$(ca "$TOK_A" "$BASE/api/v1/feed?limit=50")
+printf '%s' "$FEEDBLK" | grep -q "$PID_B" && bad "akista engellenen gonderi var" "gorulmemeliydi" || ok "engellenen gonderi akista yok"
+
+# Yorum sayaci da suzulmeli
+AFTER_CNT=$(ca "$TOK_B" "$BASE/api/v1/posts/$PID_B/comments" | num totalCount)
+[ "$AFTER_CNT" -lt "$BEFORE_CNT" ] && ok "engellenenin yorumu sayacdan dustu ($BEFORE_CNT -> $AFTER_CNT)" || bad "yorum sayaci" "$BEFORE_CNT -> $AFTER_CNT"
+
+# Engel kaldirilinca geri gelmeli
+UNBLK=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/block")
+[ "$(printf '%s' "$UNBLK" | boolf blocked)" = "false" ] && ok "engel kaldirildi" || bad "engel kaldirma" "$UNBLK"
+PROFBACK=$(ca "$TOK_A" "$BASE/api/v1/users/$USER_B")
+[ "$(printf '%s' "$PROFBACK" | field username)" = "$USER_B" ] && ok "engel kalkinca profil geri geldi" || bad "profil geri gelmedi" "$PROFBACK"
+
 # ---------------------------------------------------------------- Gonderi silme
 step "12) Gonderi silme ve medya serbest birakma"
 DELP=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/posts/$PID_A")

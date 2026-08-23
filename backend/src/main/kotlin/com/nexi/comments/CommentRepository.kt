@@ -1,5 +1,6 @@
 package com.nexi.comments
 
+import com.nexi.moderation.BlockFilter
 import com.nexi.posts.PostAuthorResponse
 import java.sql.ResultSet
 import java.sql.Timestamp
@@ -16,7 +17,8 @@ interface CommentRepository {
      */
     fun page(postId: UUID, viewerId: UUID, cursor: CommentCursor?, limit: Int): List<CommentDetails>
 
-    fun countForPost(postId: UUID): Long
+    /** Sayaç da listeyle aynı süzgeçten geçer; yoksa "3 yorum" deyip 2 tane gösterirdik. */
+    fun countForPost(postId: UUID, viewerId: UUID): Long
 
     fun findById(commentId: UUID): Comment?
 
@@ -66,12 +68,14 @@ class JdbcCommentRepository(private val dataSource: DataSource) : CommentReposit
         dataSource.connection.use { connection ->
             val cursorClause = if (cursor == null) "" else "AND (c.created_at, c.id) > (?, ?)"
             connection.prepareStatement(
-                "${detailsSelect()} WHERE c.post_id = ? AND c.status = 'PUBLISHED' $cursorClause " +
+                "${detailsSelect()} WHERE c.post_id = ? AND c.status = 'PUBLISHED' " +
+                    "AND ${BlockFilter.notBlocked("c.author_id")} $cursorClause " +
                     "ORDER BY c.created_at, c.id LIMIT ?"
             ).use { statement ->
                 var index = 1
                 statement.setObject(index++, viewerId)
                 statement.setObject(index++, postId)
+                repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
                 if (cursor != null) {
                     statement.setTimestamp(index++, Timestamp.from(cursor.createdAt))
                     statement.setObject(index++, cursor.id)
@@ -83,11 +87,14 @@ class JdbcCommentRepository(private val dataSource: DataSource) : CommentReposit
             }
         }
 
-    override fun countForPost(postId: UUID): Long = dataSource.connection.use { connection ->
+    override fun countForPost(postId: UUID, viewerId: UUID): Long = dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "SELECT COUNT(*) FROM comments WHERE post_id = ? AND status = 'PUBLISHED'"
+            "SELECT COUNT(*) FROM comments c WHERE c.post_id = ? AND c.status = 'PUBLISHED' " +
+                "AND ${BlockFilter.notBlocked("c.author_id")}"
         ).use { statement ->
-            statement.setObject(1, postId)
+            var index = 1
+            statement.setObject(index++, postId)
+            repeat(BlockFilter.BINDINGS) { statement.setObject(index++, viewerId) }
             statement.executeQuery().use { results -> results.next(); results.getLong(1) }
         }
     }
