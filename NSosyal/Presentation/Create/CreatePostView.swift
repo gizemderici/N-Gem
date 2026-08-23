@@ -8,6 +8,7 @@ struct CreatePostView: View {
     @State private var selectedAudience = "Herkes"
     @State private var selectedFormat = "Gönderi"
     @State private var allowsReplies = true
+    @State private var selectedTopicIDs: Set<String> = []
 
     private let formats = [
         ("Gönderi", "text.alignleft"),
@@ -27,6 +28,10 @@ struct CreatePostView: View {
                     formatPicker
 
                     composerCard
+
+                    if !store.topics.isEmpty {
+                        topicPicker
+                    }
 
                     VStack(spacing: 10) {
                         settingRow(
@@ -67,8 +72,9 @@ struct CreatePostView: View {
                     }
 
                     Button("Yayınla") {
-                        store.publish(text: text)
+                        store.publish(text: text, topicIDs: Array(selectedTopicIDs))
                         text = ""
+                        selectedTopicIDs = []
                     }
                     .buttonStyle(PrimaryButtonStyle(isEnabled: !trimmedText.isEmpty))
                     .disabled(trimmedText.isEmpty)
@@ -89,10 +95,49 @@ struct CreatePostView: View {
         }
         .onAppear {
             Task {
+                await store.loadTopics()
                 try? await Task.sleep(for: .milliseconds(250))
                 isEditorFocused = true
             }
         }
+    }
+
+    private var topicPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Konu ekle").font(.system(size: 14, weight: .bold))
+                Spacer()
+                Text("\(selectedTopicIDs.count)/3").font(.system(size: 11)).foregroundStyle(NSTheme.mutedInk)
+            }
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(store.topics) { topic in
+                        let selected = selectedTopicIDs.contains(topic.id)
+                        Button {
+                            withAnimation(NSTheme.spring) {
+                                if selected { selectedTopicIDs.remove(topic.id) }
+                                else if selectedTopicIDs.count < 3 { selectedTopicIDs.insert(topic.id) }
+                            }
+                            NSHaptics.selection()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(topic.icon)
+                                Text(topic.name)
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(selected ? .white : NSTheme.ink)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(selected ? NSTheme.blue : Color.white, in: Capsule())
+                            .overlay { Capsule().stroke(selected ? .clear : NSTheme.border) }
+                        }
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(14)
+        .surfaceCard()
     }
 
     private var header: some View {

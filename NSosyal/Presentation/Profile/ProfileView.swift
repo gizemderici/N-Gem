@@ -4,6 +4,7 @@ struct ProfileView: View {
     @EnvironmentObject private var store: AppStore
     @State private var selectedSection = "Gönderiler"
     @State private var showsPersonalization = false
+    @State private var showsEditProfile = false
 
     private let sections = ["Gönderiler", "Medya", "Kaydedilenler"]
 
@@ -36,6 +37,11 @@ struct ProfileView: View {
             PersonalizationSettingsView()
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showsEditProfile) {
+            EditProfileSheet()
+                .environmentObject(store)
+        }
+        .task { await store.refreshProfile() }
     }
 
     private var profileHero: some View {
@@ -67,10 +73,11 @@ struct ProfileView: View {
 
             VStack(spacing: 13) {
                 AvatarView(
-                    initials: "FD",
+                    initials: profileInitials,
                     colors: [NSTheme.cyan, NSTheme.blue, NSTheme.violet],
                     size: 92,
-                    showsVerified: true
+                    showsVerified: false,
+                    avatarURL: store.profile?.avatarUrl
                 )
                 .padding(5)
                 .background(NSTheme.canvas, in: Circle())
@@ -78,15 +85,15 @@ struct ProfileView: View {
                 .padding(.bottom, -49)
 
                 VStack(spacing: 4) {
-                    Text("Furkan Durmaz")
+                    Text(store.profile?.fullName ?? store.currentUser?.fullName ?? "N Sosyal")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(NSTheme.ink)
-                    Text("@furkandurmaz")
+                    Text("@\(store.profile?.username ?? store.currentUser?.username ?? "kullanici")")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(NSTheme.mutedInk)
                 }
 
-                Text("Dijital ürünler, sade deneyimler ve Türkiye’den çıkan iyi fikirler üzerine düşünüyorum.")
+                Text(store.profile?.bio?.isEmpty == false ? store.profile?.bio ?? "" : "Henüz biyografi eklenmedi.")
                     .font(.system(size: 13))
                     .foregroundStyle(NSTheme.ink)
                     .multilineTextAlignment(.center)
@@ -94,15 +101,15 @@ struct ProfileView: View {
                     .padding(.horizontal, 38)
 
                 HStack(spacing: 8) {
-                    Label("İstanbul", systemImage: "mappin")
-                    Label("Ağu 2026", systemImage: "calendar")
+                    Label("N Sosyal", systemImage: "person.2")
+                    Label(profileDate, systemImage: "calendar")
                 }
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(NSTheme.mutedInk)
 
                 HStack(spacing: 9) {
                     Button("Profili düzenle") {
-                        store.showToast("Profil düzenleme yakında")
+                        showsEditProfile = true
                     }
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(NSTheme.ink)
@@ -164,11 +171,11 @@ struct ProfileView: View {
 
     private var statsRow: some View {
         HStack(spacing: 0) {
-            profileStat(value: "42", label: "Gönderi")
+            profileStat(value: "\(store.profile?.postCount ?? store.profilePosts.count)", label: "Gönderi")
             Divider().frame(height: 30)
-            profileStat(value: "12,8 B", label: "Takipçi")
+            profileStat(value: compactNumber(store.profile?.followerCount ?? 0), label: "Takipçi")
             Divider().frame(height: 30)
-            profileStat(value: "684", label: "Takip")
+            profileStat(value: compactNumber(store.profile?.followingCount ?? 0), label: "Takip")
         }
         .padding(.vertical, 14)
         .surfaceCard()
@@ -211,7 +218,7 @@ struct ProfileView: View {
     private var profileGrid: some View {
         let posts = selectedSection == "Kaydedilenler"
             ? store.posts.filter { store.savedPostIDs.contains($0.id) }
-            : store.posts
+            : store.profilePosts
 
         return Group {
             if posts.isEmpty {
@@ -260,5 +267,64 @@ struct ProfileView: View {
             }
         }
         .pressScale()
+    }
+
+    private var profileInitials: String {
+        (store.profile?.fullName ?? store.currentUser?.fullName ?? "NS")
+            .split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+    }
+
+    private var profileDate: String {
+        guard let value = store.profile?.createdAt,
+              let date = ISO8601DateFormatter().date(from: value) else { return "Yeni üye" }
+        return date.formatted(.dateTime.month(.abbreviated).year())
+    }
+
+    private func compactNumber(_ value: Int) -> String {
+        value >= 1_000 ? String(format: "%.1f B", Double(value) / 1_000).replacingOccurrences(of: ".0", with: "") : "\(value)"
+    }
+}
+
+struct EditProfileSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var fullName = ""
+    @State private var bio = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Profil bilgileri") {
+                    TextField("Ad soyad", text: $fullName)
+                    TextField("Biyografi", text: $bio, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+                Section {
+                    Text("Adın 2–80, biyografin en fazla 280 karakter olabilir.")
+                        .font(.caption)
+                        .foregroundStyle(NSTheme.mutedInk)
+                }
+            }
+            .navigationTitle("Profili düzenle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Vazgeç") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Kaydet") {
+                        Task {
+                            isSaving = true
+                            if await store.updateProfile(fullName: fullName, bio: bio) { dismiss() }
+                            isSaving = false
+                        }
+                    }
+                    .disabled(isSaving || fullName.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 || bio.count > 280)
+                }
+            }
+            .onAppear {
+                fullName = store.profile?.fullName ?? store.currentUser?.fullName ?? ""
+                bio = store.profile?.bio ?? ""
+            }
+        }
     }
 }

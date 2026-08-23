@@ -5,7 +5,7 @@ struct StoryStrip: View {
     @Binding var selectedStory: SocialStory?
     @State private var hasAppeared = false
 
-    private let stories = MockSocialData.stories
+    private var stories: [SocialStory] { store.stories }
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -53,7 +53,8 @@ struct StoryStrip: View {
                         initials: story.creator.initials,
                         colors: story.creator.colors,
                         size: 61,
-                        showsVerified: false
+                        showsVerified: false,
+                        avatarURL: story.creator.avatarURL
                     )
                     .overlay {
                         Circle().stroke(NSTheme.canvas, lineWidth: 3)
@@ -89,6 +90,7 @@ struct StoryStrip: View {
 }
 
 struct StoryViewer: View {
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -143,6 +145,7 @@ struct StoryViewer: View {
             isPaused = isPressing
         }, perform: {})
         .task(id: currentIndex) {
+            store.markStoryViewed(story)
             await runProgress()
         }
         .sensoryFeedback(.selection, trigger: currentIndex)
@@ -167,6 +170,12 @@ struct StoryViewer: View {
                     .foregroundStyle(.white.opacity(0.19))
                     .rotationEffect(.degrees(-9))
                     .offset(x: -proxy.size.width * 0.23, y: -proxy.size.height * 0.08)
+
+                if let mediaURL = story.mediaURL, let mediaMimeType = story.mediaMimeType {
+                    RemotePostMedia(urlString: mediaURL, mimeType: mediaMimeType)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 100)
+                }
             }
             .animation(reduceMotion ? nil : NSTheme.gentleSpring, value: currentIndex)
         }
@@ -209,7 +218,8 @@ struct StoryViewer: View {
                 initials: story.creator.initials,
                 colors: story.creator.colors,
                 size: 39,
-                showsVerified: story.creator.isVerified
+                showsVerified: story.creator.isVerified,
+                avatarURL: story.creator.avatarURL
             )
 
             VStack(alignment: .leading, spacing: 2) {

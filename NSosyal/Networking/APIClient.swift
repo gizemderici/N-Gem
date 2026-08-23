@@ -147,13 +147,135 @@ struct APIClient {
         )
     }
 
-    func createPost(text: String, accessToken: String) async throws -> APIPost {
+    func topics() async throws -> APITopicListResponse {
+        try await send(path: "/api/v1/topics", method: "GET")
+    }
+
+    func userTopics(accessToken: String) async throws -> APIUserTopicsResponse {
+        try await send(path: "/api/v1/users/me/topics", method: "GET", accessToken: accessToken)
+    }
+
+    func updateUserTopics(_ topicIDs: [String], accessToken: String) async throws -> APIUserTopicsResponse {
+        try await send(
+            path: "/api/v1/users/me/topics",
+            method: "PUT",
+            body: APIUpdateTopicsRequest(topicIds: topicIDs),
+            accessToken: accessToken
+        )
+    }
+
+    func createPost(text: String, topicIDs: [String] = [], accessToken: String) async throws -> APIPost {
         try await send(
             path: "/api/v1/posts",
             method: "POST",
-            body: CreatePostRequest(text: text, mediaIds: []),
+            body: CreatePostRequest(text: text, mediaIds: [], topicIds: topicIDs),
             accessToken: accessToken
         )
+    }
+
+    func comments(postID: String, accessToken: String) async throws -> APICommentPageResponse {
+        try await send(path: "/api/v1/posts/\(postID)/comments?limit=100", method: "GET", accessToken: accessToken)
+    }
+
+    func createComment(postID: String, text: String, accessToken: String) async throws -> APIComment {
+        try await send(
+            path: "/api/v1/posts/\(postID)/comments",
+            method: "POST",
+            body: APICreateCommentRequest(text: text),
+            accessToken: accessToken
+        )
+    }
+
+    func deleteComment(id: String, accessToken: String) async throws {
+        let _: MessageResponse = try await send(path: "/api/v1/comments/\(id)", method: "DELETE", accessToken: accessToken)
+    }
+
+    func profile(username: String, accessToken: String) async throws -> APIUserProfile {
+        try await send(path: "/api/v1/users/\(username)", method: "GET", accessToken: accessToken)
+    }
+
+    func posts(username: String, accessToken: String) async throws -> APIFeedResponse {
+        try await send(path: "/api/v1/users/\(username)/posts?limit=50", method: "GET", accessToken: accessToken)
+    }
+
+    func updateProfile(fullName: String, bio: String, accessToken: String) async throws -> APIUserProfile {
+        try await send(
+            path: "/api/v1/users/me/profile",
+            method: "PATCH",
+            body: APIUpdateProfileRequest(fullName: fullName, bio: bio),
+            accessToken: accessToken
+        )
+    }
+
+    func setFollow(username: String, active: Bool, accessToken: String) async throws -> APIFollowResponse {
+        try await send(
+            path: "/api/v1/users/\(username)/follow",
+            method: active ? "PUT" : "DELETE",
+            accessToken: accessToken
+        )
+    }
+
+    func reportPost(id: String, accessToken: String) async throws -> APIReportResponse {
+        try await send(
+            path: "/api/v1/reports",
+            method: "POST",
+            body: APICreateReportRequest(targetType: "POST", targetId: id, reason: "OTHER", details: nil),
+            accessToken: accessToken
+        )
+    }
+
+    func storyFeed(accessToken: String) async throws -> APIStoryFeedResponse {
+        try await send(path: "/api/v1/stories/feed", method: "GET", accessToken: accessToken)
+    }
+
+    func markStoryViewed(id: String, accessToken: String) async throws -> APIStoryViewResponse {
+        try await send(path: "/api/v1/stories/\(id)/view", method: "PUT", accessToken: accessToken)
+    }
+
+    func notifications(accessToken: String) async throws -> APINotificationPageResponse {
+        try await send(path: "/api/v1/notifications?limit=100", method: "GET", accessToken: accessToken)
+    }
+
+    func markAllNotificationsRead(accessToken: String) async throws -> APINotificationReadResponse {
+        try await send(path: "/api/v1/notifications/read-all", method: "PUT", accessToken: accessToken)
+    }
+
+    func explore(accessToken: String) async throws -> APIExploreResponse {
+        try await send(path: "/api/v1/explore?limit=50", method: "GET", accessToken: accessToken)
+    }
+
+    func search(query: String, accessToken: String) async throws -> APISearchResponse {
+        try await send(path: queryPath("/api/v1/search", items: [URLQueryItem(name: "q", value: query)]), method: "GET", accessToken: accessToken)
+    }
+
+    func conversations(accessToken: String) async throws -> APIConversationPageResponse {
+        try await send(path: "/api/v1/conversations?limit=100", method: "GET", accessToken: accessToken)
+    }
+
+    func openConversation(username: String, accessToken: String) async throws -> APIConversation {
+        try await send(
+            path: "/api/v1/conversations",
+            method: "POST",
+            body: APICreateConversationRequest(username: username),
+            accessToken: accessToken
+        )
+    }
+
+    func messages(conversationID: String, accessToken: String) async throws -> APIMessagePageResponse {
+        try await send(path: "/api/v1/conversations/\(conversationID)/messages?limit=100", method: "GET", accessToken: accessToken)
+    }
+
+    func sendMessage(conversationID: String, text: String, accessToken: String) async throws -> APIMessage {
+        try await send(
+            path: "/api/v1/conversations/\(conversationID)/messages",
+            method: "POST",
+            body: APISendMessageRequest(text: text, mediaId: nil),
+            accessToken: accessToken
+        )
+    }
+
+    func markConversationRead(id: String, accessToken: String) async throws -> APIReadReceiptResponse {
+        try await send(path: "/api/v1/conversations/\(id)/read", method: "PUT", accessToken: accessToken)
     }
 
     func setLike(postID: String, active: Bool, accessToken: String) async throws -> APIPostInteractionResponse {
@@ -210,6 +332,13 @@ struct APIClient {
         if let accessToken {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
+    }
+
+    private func queryPath(_ path: String, items: [URLQueryItem]) -> String {
+        var components = URLComponents()
+        components.path = path
+        components.queryItems = items
+        return components.string ?? path
     }
 
     private func execute<Response: Decodable>(_ request: URLRequest) async throws -> Response {

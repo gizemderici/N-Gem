@@ -6,16 +6,15 @@ struct ExploreView: View {
     @State private var selectedTopic = "Tümü"
     @State private var showsFilters = false
 
-    private let topics = ["Tümü", "Teknoloji", "Tasarım", "Yerel", "Mizah", "Eğitim"]
+    private var topics: [String] { ["Tümü"] + store.topics.map(\.name) }
 
     private var filteredPosts: [SocialPost] {
-        store.posts.filter { post in
+        let source = query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
+            ? store.searchPosts
+            : store.explorePosts
+        return source.filter { post in
             let topicMatches = selectedTopic == "Tümü" || post.topic == selectedTopic
-            let queryMatches = query.isEmpty
-                || post.body.localizedCaseInsensitiveContains(query)
-                || post.creator.name.localizedCaseInsensitiveContains(query)
-                || post.topic.localizedCaseInsensitiveContains(query)
-            return topicMatches && queryMatches
+            return topicMatches
         }
     }
 
@@ -31,6 +30,10 @@ struct ExploreView: View {
 
                     searchAndFilterBar
                         .padding(.horizontal, NSTheme.horizontalPadding)
+
+                    if !query.isEmpty && !store.searchUsers.isEmpty {
+                        searchUserStrip
+                    }
 
                     if query.isEmpty && selectedTopic == "Tümü" {
                         trendingHero
@@ -76,6 +79,12 @@ struct ExploreView: View {
         }
         .sheet(isPresented: $showsFilters) {
             ExploreFilterSheet(selectedTopic: $selectedTopic, topics: topics)
+        }
+        .task { await store.loadExplore() }
+        .task(id: query) {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await store.search(query)
         }
     }
 
@@ -208,6 +217,36 @@ struct ExploreView: View {
         }
     }
 
+    private var searchUserStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Kişiler")
+                .font(.system(size: 16, weight: .bold))
+                .padding(.horizontal, NSTheme.horizontalPadding)
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) {
+                    ForEach(store.searchUsers) { user in
+                        HStack(spacing: 9) {
+                            AvatarView(
+                                initials: user.fullName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased(),
+                                size: 38,
+                                avatarURL: user.avatarUrl
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.fullName).font(.system(size: 12, weight: .bold)).lineLimit(1)
+                                Text("@\(user.username)").font(.system(size: 10)).foregroundStyle(NSTheme.mutedInk)
+                            }
+                        }
+                        .padding(11)
+                        .frame(width: 190, alignment: .leading)
+                        .surfaceCard()
+                    }
+                }
+                .padding(.horizontal, NSTheme.horizontalPadding)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
     private func communityCard(title: String, detail: String, icon: String, color: Color) -> some View {
         Button {
             store.showToast("\(title) topluluğuna katıldın")
@@ -240,7 +279,9 @@ struct ExploreView: View {
             store.openReason(for: post)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                if let artwork = post.artwork,
+                if let mediaURL = post.mediaURL, let mediaMimeType = post.mediaMimeType {
+                    RemotePostMedia(urlString: mediaURL, mimeType: mediaMimeType)
+                } else if let artwork = post.artwork,
                    let title = post.artworkTitle,
                    let subtitle = post.artworkSubtitle {
                     MediaArtwork(

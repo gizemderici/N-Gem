@@ -61,6 +61,7 @@ struct Creator: Identifiable, Hashable {
     let initials: String
     let colors: [Color]
     let isVerified: Bool
+    var avatarURL: String? = nil
 }
 
 enum ArtworkStyle: String, Hashable {
@@ -123,6 +124,8 @@ struct SocialStory: Identifiable, Hashable {
     let time: String
     let isSeen: Bool
     let isOwn: Bool
+    var mediaURL: String? = nil
+    var mediaMimeType: String? = nil
 }
 
 enum NotificationKind: String, Hashable {
@@ -157,6 +160,8 @@ struct SocialNotification: Identifiable, Hashable {
     let time: String
     let kind: NotificationKind
     let isUnread: Bool
+    var targetType: String? = nil
+    var targetID: String? = nil
 }
 
 enum FeedEventName: String {

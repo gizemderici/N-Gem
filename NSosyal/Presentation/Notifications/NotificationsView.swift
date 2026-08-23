@@ -51,6 +51,7 @@ struct NotificationsView: View {
             }
             .scrollIndicators(.hidden)
         }
+        .task { await store.loadNotifications() }
     }
 
     private var header: some View {
@@ -65,7 +66,7 @@ struct NotificationsView: View {
             }
             Spacer()
             GlassIconButton(systemName: "checkmark", accessibilityLabel: "Tümünü okundu işaretle") {
-                store.showToast("Tüm bildirimler okundu")
+                Task { await store.markAllNotificationsRead() }
             }
         }
     }
@@ -103,7 +104,8 @@ struct NotificationsView: View {
                         initials: notification.creator.initials,
                         colors: notification.creator.colors,
                         size: 46,
-                        showsVerified: notification.creator.isVerified
+                        showsVerified: notification.creator.isVerified,
+                        avatarURL: notification.creator.avatarURL
                     )
 
                     Image(systemName: notification.kind.icon)

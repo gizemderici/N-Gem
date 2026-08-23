@@ -214,23 +214,23 @@ struct AvatarView: View {
     var colors: [Color] = [NSTheme.blue, NSTheme.violet]
     var size: CGFloat = 42
     var showsVerified = false
+    var avatarURL: String? = nil
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: colors,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay {
-                    Text(initials)
-                        .font(.system(size: size * 0.31, weight: .bold))
-                        .foregroundStyle(.white)
+            if let avatarURL, let url = URL(string: avatarURL) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        avatarFallback
+                    }
                 }
                 .frame(width: size, height: size)
+                .clipShape(Circle())
+            } else {
+                avatarFallback
+            }
 
             if showsVerified {
                 Image(systemName: "checkmark.seal.fill")
@@ -242,5 +242,16 @@ struct AvatarView: View {
             }
         }
         .accessibilityHidden(true)
+    }
+
+    private var avatarFallback: some View {
+        Circle()
+            .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .overlay {
+                Text(initials)
+                    .font(.system(size: size * 0.31, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
     }
 }

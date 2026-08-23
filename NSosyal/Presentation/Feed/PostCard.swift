@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PostCard: View {
     @EnvironmentObject private var store: AppStore
+    @State private var showsComments = false
 
     let post: SocialPost
 
@@ -56,6 +57,10 @@ struct PostCard: View {
         .surfaceCard(radius: 24, shadow: false)
         .onAppear { store.beginViewing(post) }
         .onDisappear { store.endViewing(post) }
+        .sheet(isPresented: $showsComments) {
+            CommentsSheet(post: post)
+                .environmentObject(store)
+        }
     }
 
     private var postHeader: some View {
@@ -64,7 +69,8 @@ struct PostCard: View {
                 initials: post.creator.initials,
                 colors: post.creator.colors,
                 size: 43,
-                showsVerified: post.creator.isVerified
+                showsVerified: post.creator.isVerified,
+                avatarURL: post.creator.avatarURL
             )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -162,7 +168,10 @@ struct PostCard: View {
                 value: post.commentCount,
                 color: NSTheme.mutedInk,
                 label: "Yorumlar"
-            ) {}
+            ) {
+                showsComments = true
+                NSHaptics.selection()
+            }
 
             Spacer()
 
@@ -224,6 +233,110 @@ struct PostCard: View {
                 .replacingOccurrences(of: ".0", with: "")
         }
         return "\(value)"
+    }
+}
+
+struct CommentsSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = ""
+    @State private var isSending = false
+
+    let post: SocialPost
+
+    private var comments: [APIComment] { store.commentsByPost[post.id] ?? [] }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Group {
+                    if store.dataSourceMode != .backend {
+                        ContentUnavailableView("Yorumlar örnek modda kapalı", systemImage: "bubble.left")
+                    } else if comments.isEmpty {
+                        ContentUnavailableView("İlk yorumu sen yaz", systemImage: "bubble.left.and.bubble.right")
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 14) {
+                                ForEach(comments) { comment in
+                                    commentRow(comment)
+                                }
+                            }
+                            .padding()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                HStack(spacing: 10) {
+                    TextField("Yorum yaz…", text: $draft, axis: .vertical)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(NSTheme.elevatedSurface, in: Capsule())
+
+                    Button {
+                        Task {
+                            isSending = true
+                            if await store.addComment(draft, to: post) { draft = "" }
+                            isSending = false
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? NSTheme.subtleInk : NSTheme.blue, in: Circle())
+                    }
+                    .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.dataSourceMode != .backend)
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+            }
+            .background(NSTheme.canvas)
+            .navigationTitle("Yorumlar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Bitti") { dismiss() } }
+            }
+            .task { await store.loadComments(for: post) }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func commentRow(_ comment: APIComment) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            AvatarView(
+                initials: initials(comment.author.fullName),
+                size: 36,
+                avatarURL: comment.author.avatarUrl
+            )
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(comment.author.fullName).font(.system(size: 13, weight: .bold))
+                    Text("@\(comment.author.username) · \(relativeTime(comment.createdAt))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(NSTheme.mutedInk)
+                    Spacer()
+                    if comment.deletableByMe {
+                        Button(role: .destructive) { Task { await store.deleteComment(comment) } } label: {
+                            Image(systemName: "trash").font(.system(size: 11))
+                        }
+                    }
+                }
+                Text(comment.text).font(.system(size: 14)).foregroundStyle(NSTheme.ink)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func initials(_ name: String) -> String {
+        name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+    }
+
+    private func relativeTime(_ value: String) -> String {
+        let date = ISO8601DateFormatter().date(from: value)
+        guard let date else { return "şimdi" }
+        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
     }
 }
 
