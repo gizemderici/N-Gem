@@ -306,7 +306,18 @@ UF=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/follow")
 step "11) Oneri olaylarinin kaydedilmesi"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # clientEventId ve sessionId UUID olmak zorunda.
-uuid() { cat /proc/sys/kernel/random/uuid 2>/dev/null || powershell -NoProfile -Command "[guid]::NewGuid().ToString()" | tr -d '\r'; }
+uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -Command "[guid]::NewGuid().ToString()" | tr -d '\r'
+  else
+    printf 'UUID uretecek uuidgen, /proc veya powershell bulunamadi.\n' >&2
+    return 1
+  fi
+}
 EV1=$(uuid); EV2=$(uuid); SESSION=$(uuid)
 
 EV=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Type: application/json' -d "{\"events\":[
