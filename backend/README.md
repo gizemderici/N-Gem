@@ -54,10 +54,10 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 100 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 115 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
-takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, engelleme/şikâyet ve öneri olayları.
+takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, engelleme/şikâyet ve öneri olayları.
 
 ```bash
 docker compose up -d --build
@@ -496,6 +496,48 @@ yok oluyor ve takip grafiği sınırlı; yine de sorgunun büyümemesi için tav
 `processing_status` ikisi de `READY`) ve kullanıcıya ait olması gerekir. Bir
 medya yalnızca tek bir yerde kullanılabilir: gönderide kullanılan hikâyeye,
 hikâyede kullanılan başka bir hikâyeye eklenemez (`MEDIA_ALREADY_ATTACHED`).
+
+## Mesajlaşma
+
+İlk sürüm **bire bir**; grup konuşması ve WebSocket sonraki sürümde. Bugün her
+şey HTTP üzerinden çalışıyor.
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/api/v1/conversations` | `{ "username" }` — varsa getirir, yoksa açar |
+| `GET` | `/api/v1/conversations` | Konuşma listesi, imleçli, `totalUnread` ile |
+| `GET` | `/api/v1/conversations/{id}/messages` | Yeniden eskiye, imleçli |
+| `POST` | `/api/v1/conversations/{id}/messages` | `{ "text"?, "mediaId"? }` |
+| `PUT` | `/api/v1/conversations/{id}/read` | Okundu su seviyesini şimdiye çeker |
+| `DELETE` | `/api/v1/messages/{id}` | Yalnızca gönderen siler |
+
+**Konuşma tekilliği.** `conversations.direct_key` iki üyenin sıralı kimlik
+çifti (`küçük:büyük`) ve UNIQUE. "Varsa getir, yoksa oluştur" bu sayede yarış
+koşulundan etkilenmiyor: iki taraf aynı anda açmaya çalışsa bile tek konuşma
+oluşuyor.
+
+Henüz mesaj gönderilmemiş konuşma listede görünmez — boş sohbet balonları
+birikmesin diye.
+
+**Okundu bilgisi tek bir su seviyesinden geliyor.** `conversation_members.last_read_at`
+hem okunmamış sayısını hem "görüldü" bilgisini veriyor:
+
+- Okunmamış = karşı tarafın, benim su seviyemden sonra gönderdiği mesajlar
+- Görüldü = karşı tarafın su seviyesi mesajın zamanını geçmiş
+
+Bu yüzden mesaj başına ayrı bir okuma satırı tutulmuyor. Bire bir sohbette
+per-mesaj tablo, aynı bilgiyi çok daha pahalıya verirdi.
+
+`seenByOther` yalnızca **kendi** mesajların için doldurulur; başkasının mesajında
+o bilginin bir anlamı yok.
+
+**Mesaj tipi medyadan çıkarılıyor:** `image/*` → `IMAGE`, `video/*` → `VIDEO`,
+medya yoksa `TEXT`. `SYSTEM` tipi ileride otomatik bildirimler için ayrıldı.
+
+**Engelleme.** Engellenen kullanıcıyla konuşma başlatılamaz; mevcut konuşma
+**iki tarafın da** listesinden düşer ve mesaj gönderilemez
+(`CONVERSATION_NOT_FOUND`). Üye olmayan kişiye de aynı kod döner — "erişimin yok"
+demek konuşmanın varlığını doğrulardı.
 
 ## Engelleme ve şikâyet
 

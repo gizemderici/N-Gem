@@ -395,6 +395,70 @@ BLKST=$(ca "$TOK_A" "$BASE/api/v1/stories/feed")
 printf '%s' "$BLKST" | grep -q "$USER_B" && bad "engellenenin hikayesi gorunuyor" "$BLKST" || ok "engellenenin hikayesi gizlendi"
 ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/block" >/dev/null
 
+# ---------------------------------------------------------- 11c) Mesajlasma
+step "11c) Mesajlasma"
+
+CONV=$(ca "$TOK_A" -X POST "$BASE/api/v1/conversations" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$USER_B\"}")
+CID=$(printf '%s' "$CONV" | field id)
+[ -n "$CID" ] && ok "konusma acildi" || bad "konusma acma" "$CONV"
+
+# Ayni konusma iki taraftan da ayni olmali
+CONV2=$(ca "$TOK_B" -X POST "$BASE/api/v1/conversations" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$USER_A\"}")
+[ "$(printf '%s' "$CONV2" | field id)" = "$CID" ] && ok "iki taraftan ayni konusma" || bad "konusma tekilligi" "$CONV2"
+
+SELFCONV=$(ca "$TOK_A" -X POST "$BASE/api/v1/conversations" -H 'Content-Type: application/json' -d "{\"username\":\"$USER_A\"}")
+[ "$(printf '%s' "$SELFCONV" | field code)" = "CANNOT_MESSAGE_SELF" ] && ok "kendine mesaj reddedildi" || bad "CANNOT_MESSAGE_SELF" "$SELFCONV"
+
+# Mesajsiz konusma listede gorunmemeli
+EMPTYLIST=$(ca "$TOK_A" "$BASE/api/v1/conversations")
+printf '%s' "$EMPTYLIST" | grep -q "$CID" && bad "mesajsiz konusma listede" "$EMPTYLIST" || ok "mesajsiz konusma listede yok"
+
+M1=$(ca "$TOK_A" -X POST "$BASE/api/v1/conversations/$CID/messages" -H 'Content-Type: application/json' \
+  -d '{"text":"Merhaba, E2E testinden yaziyorum"}')
+MID1=$(printf '%s' "$M1" | field id)
+[ "$(printf '%s' "$M1" | field type)" = "TEXT" ] && ok "metin mesaji gonderildi" || bad "mesaj gonderme" "$M1"
+
+ca "$TOK_B" -X POST "$BASE/api/v1/conversations/$CID/messages" -H 'Content-Type: application/json' \
+  -d '{"text":"Aldim"}' >/dev/null
+
+# Gorsel mesaj
+IMSG=$(new_image 9 "$TOK_A")
+MEDIAMSG=$(ca "$TOK_A" -X POST "$BASE/api/v1/conversations/$CID/messages" -H 'Content-Type: application/json' \
+  -d "{\"mediaId\":\"$IMSG\"}")
+[ "$(printf '%s' "$MEDIAMSG" | field type)" = "IMAGE" ] && ok "gorsel mesaj IMAGE tipinde" || bad "gorsel mesaj" "$MEDIAMSG"
+printf '%s' "$MEDIAMSG" | grep -q '"url":"http' && ok "mesaj medyasinin sureli adresi var" || bad "medya adresi" "$MEDIAMSG"
+
+# Liste ve siralama
+MSGS=$(ca "$TOK_A" "$BASE/api/v1/conversations/$CID/messages")
+printf '%s' "$MSGS" | grep -q "Merhaba, E2E" && ok "mesajlar listelendi" || bad "mesaj listesi" "$MSGS"
+
+# Okunmamis sayaci
+CLIST=$(ca "$TOK_A" "$BASE/api/v1/conversations")
+[ "$(printf '%s' "$CLIST" | num unreadCount)" = "1" ] && ok "okunmamis sayaci dogru" || bad "okunmamis sayaci" "$CLIST"
+
+READ=$(ca "$TOK_A" -X PUT "$BASE/api/v1/conversations/$CID/read")
+[ "$(printf '%s' "$READ" | num unreadCount)" = "0" ] && ok "okundu isaretlendi" || bad "okundu" "$READ"
+
+# Yabanci konusmaya erisememeli
+OUTSIDER=$(ca "$TOK_B" "$BASE/api/v1/conversations/$CID/messages")
+printf '%s' "$OUTSIDER" | grep -q '"items"' && ok "uye mesajlari okuyabiliyor" || bad "uye erisimi" "$OUTSIDER"
+
+# Mesaj silme yalnizca gonderene
+NODELM=$(ca "$TOK_B" -X DELETE "$BASE/api/v1/messages/$MID1")
+[ "$(printf '%s' "$NODELM" | field code)" = "MESSAGE_NOT_FOUND" ] && ok "baskasinin mesaji silinemiyor" || bad "mesaj silme yetkisi" "$NODELM"
+DELM=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/messages/$MID1")
+printf '%s' "$DELM" | grep -q "silindi" && ok "gonderen mesajini sildi" || bad "mesaj silme" "$DELM"
+
+# Engelleme konusmayi gizlemeli
+ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/block" >/dev/null
+BLKCONV=$(ca "$TOK_A" "$BASE/api/v1/conversations")
+printf '%s' "$BLKCONV" | grep -q "$CID" && bad "engellenenle konusma listede" "$BLKCONV" || ok "engellenenle konusma gizlendi"
+BLKSEND=$(ca "$TOK_A" -X POST "$BASE/api/v1/conversations/$CID/messages" -H 'Content-Type: application/json' -d '{"text":"Gecmemeli"}')
+[ "$(printf '%s' "$BLKSEND" | field code)" = "CONVERSATION_NOT_FOUND" ] && ok "engelliye mesaj gonderilemiyor" || bad "engelli mesaj" "$BLKSEND"
+ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/block" >/dev/null
+
 # ------------------------------------------------------- 11b) Engelleme ve sikayet
 step "11b) Engelleme ve sikayet"
 

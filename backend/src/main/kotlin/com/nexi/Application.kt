@@ -21,6 +21,9 @@ import com.nexi.media.MediaService
 import com.nexi.moderation.JdbcModerationRepository
 import com.nexi.moderation.ModerationService
 import com.nexi.moderation.moderationRoutes
+import com.nexi.messaging.JdbcMessagingRepository
+import com.nexi.messaging.MessagingService
+import com.nexi.messaging.messagingRoutes
 import com.nexi.media.S3ObjectStorage
 import com.nexi.media.mediaRoutes
 import com.nexi.posts.JdbcPostRepository
@@ -106,6 +109,11 @@ fun Application.module() {
     val profileService = ProfileService(profileRepository, objectStorage)
     val storyRepository = JdbcStoryRepository(dataSource)
     val storyService = StoryService(storyRepository, objectStorage)
+    val messagingService = MessagingService(
+        repository = JdbcMessagingRepository(dataSource),
+        users = { username, viewerId -> profileRepository.findByUsername(username, viewerId)?.id },
+        storage = objectStorage,
+    )
     val moderationService = ModerationService(
         repository = JdbcModerationRepository(dataSource),
         users = { username -> profileRepository.findIdByUsername(username) },
@@ -210,6 +218,7 @@ fun Application.module() {
         profileRoutes(profileService, postService)
         moderationRoutes(moderationService)
         storyRoutes(storyService)
+        messagingRoutes(messagingService)
         topicRoutes(topicService)
         feedRoutes(feedService)
     }
