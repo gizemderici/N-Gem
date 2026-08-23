@@ -79,14 +79,62 @@ class RecommendationServiceTest {
     }
 
     @Test
-    fun `clients cannot forge the server side serving event`() {
-        val forged = interest("oyun").copy(
-            eventType = RecommendationEventType.FEED_SERVED,
-            postId = "00000000-0000-0000-0000-0000000000ff",
-        )
+    fun `clients cannot forge events the server generates itself`() {
+        // Sunum kaydını istemci uyduramaz; beğeni, kaydetme ve şikâyet ise
+        // zaten backend işleminde yazılıyor, istemci de gönderirse ayni
+        // etkilesim iki kez sayilirdi.
+        RecommendationService.SERVER_GENERATED.forEach { type ->
+            val forged = interest("oyun").copy(
+                eventType = type,
+                postId = "00000000-0000-0000-0000-0000000000ff",
+            )
 
-        assertEquals("SERVER_ONLY_EVENT", assertFailsWith<ApiException> {
-            service.append(userId, RecommendationEventBatchRequest(listOf(forged)))
+            assertEquals("SERVER_ONLY_EVENT", assertFailsWith<ApiException> {
+                service.append(userId, RecommendationEventBatchRequest(listOf(forged)))
+            }.code, "$type reddedilmeli")
+        }
+    }
+
+    @Test
+    fun `an event from a future contract version is refused`() {
+        // Anlamini bilmedigimiz bir olayi yazmak veriyi sonradan ayiklanamaz
+        // hale getirir.
+        listOf(EventContract.CURRENT_VERSION + 1, 0, -1).forEach { version ->
+            assertEquals("UNSUPPORTED_SCHEMA_VERSION", assertFailsWith<ApiException> {
+                service.append(
+                    userId,
+                    RecommendationEventBatchRequest(listOf(interest("oyun").copy(schemaVersion = version))),
+                )
+            }.code, "sürüm $version reddedilmeli")
+        }
+    }
+
+    @Test
+    fun `an older but supported contract version is still accepted`() {
+        val old = interest("oyun").copy(schemaVersion = EventContract.OLDEST_SUPPORTED_VERSION)
+
+        assertEquals(1, service.append(userId, RecommendationEventBatchRequest(listOf(old))).accepted)
+    }
+
+    @Test
+    fun `the client identifies itself and cannot claim to be the backend`() {
+        val fromPhone = interest("oyun").copy(platform = "ios", appVersion = "1.4.2")
+        assertEquals(1, service.append(userId, RecommendationEventBatchRequest(listOf(fromPhone))).accepted)
+
+        listOf("backend", "windows-phone").forEach { platform ->
+            assertEquals("INVALID_PLATFORM", assertFailsWith<ApiException> {
+                service.append(
+                    userId,
+                    RecommendationEventBatchRequest(listOf(interest("oyun", suffix = 9).copy(platform = platform))),
+                )
+            }.code, "'$platform' reddedilmeli")
+        }
+
+        assertEquals("INVALID_APP_VERSION", assertFailsWith<ApiException> {
+            service.append(
+                userId,
+                RecommendationEventBatchRequest(listOf(interest("oyun", suffix = 8).copy(appVersion = "v".repeat(21)))),
+            )
         }.code)
     }
 
@@ -95,7 +143,7 @@ class RecommendationServiceTest {
         val base = RecommendationEventRequest(
             clientEventId = "00000000-0000-0000-0000-000000000021",
             sessionId = "00000000-0000-0000-0000-000000000022",
-            eventType = RecommendationEventType.CONTENT_LIKED,
+            eventType = RecommendationEventType.CONTENT_VIEW,
             surface = "feed",
             localHour = 21,
             timezoneOffsetMinutes = 180,

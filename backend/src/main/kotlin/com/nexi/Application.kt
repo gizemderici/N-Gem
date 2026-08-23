@@ -138,6 +138,7 @@ fun Application.module() {
         repository = JdbcModerationRepository(dataSource),
         users = { username -> profileRepository.findIdByUsername(username) },
         storage = objectStorage,
+        recommendations = { events -> recommendationRepository.append(events) },
     )
     val searchService = SearchService(postRepository, JdbcSearchRepository(dataSource), objectStorage)
     val topicService = TopicService(topicRepository)

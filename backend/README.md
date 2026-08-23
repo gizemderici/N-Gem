@@ -52,7 +52,7 @@ Bu testler normal birim testlerinden ayrı tutulur:
 .\gradlew.bat integrationTest --no-daemon
 ```
 
-`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V14`
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V15`
 migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
 konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
 senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her
@@ -391,7 +391,7 @@ Mobil istemciler ham dokunma koordinatı yerine anlamlı ürün olaylarını top
 }
 ```
 
-Olay adlarının ve anlamlarının bağlayıcı listesi [`docs/event-contract-v1.md`](docs/event-contract-v1.md) belgesindedir; backend, iOS ve Android o belgeye uymak zorundadır. Olay kimlikleri kullanıcı bazında idempotenttir; süre, saat, gönderi sahipliği ve olay zamanı backendde doğrulanır.
+Olay adlarının ve anlamlarının bağlayıcı listesi [`docs/event-contract.md`](docs/event-contract.md) belgesindedir; backend, iOS ve Android o belgeye uymak zorundadır. Olay kimlikleri kullanıcı bazında idempotenttir; süre, saat, gönderi sahipliği ve olay zamanı backendde doğrulanır.
 
 İki ayrı olay karıştırılmamalı: `feed_served` backend'in gönderiyi akışa koyduğunu, `content_impression` ise gönderinin ekranda gerçekten göründüğünü söyler. Sunum kaydı yalnızca sunucu tarafından üretilir; istemciden gelirse `SERVER_ONLY_EVENT` ile reddedilir.
 

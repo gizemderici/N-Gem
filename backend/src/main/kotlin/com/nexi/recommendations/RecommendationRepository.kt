@@ -30,8 +30,9 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                 """INSERT INTO recommendation_events
                    (id, user_id, post_id, client_event_id, session_id, feed_request_id, event_type,
                     surface, position, dwell_millis, completion_ratio, local_hour,
-                    timezone_offset_minutes, target_feature, occurred_at, received_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    timezone_offset_minutes, target_feature, occurred_at, received_at,
+                    schema_version, app_version, platform)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (user_id, client_event_id) DO NOTHING"""
             ).use { statement ->
                 events.forEach { event ->
@@ -51,6 +52,9 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                     statement.setString(14, event.targetFeature)
                     statement.setTimestamp(15, Timestamp.from(event.occurredAt))
                     statement.setTimestamp(16, Timestamp.from(event.receivedAt))
+                    statement.setInt(17, event.schemaVersion)
+                    statement.setString(18, event.appVersion)
+                    statement.setString(19, event.platform?.wireName)
                     statement.addBatch()
                 }
                 statement.executeBatch().sumOf { if (it > 0) it else 0 }

@@ -6,6 +6,7 @@ import com.nexi.auth.validation
 import com.nexi.posts.PostRepository
 import com.nexi.topics.TopicResolver
 import io.ktor.http.HttpStatusCode
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -67,8 +68,22 @@ class RecommendationService(
         if (request.completionRatio != null && request.completionRatio !in 0.0..1.0) throw validation("INVALID_COMPLETION", "Tamamlama oranı geçersiz.", "completionRatio")
         val surface = request.surface.trim().lowercase().take(40)
         if (surface.isBlank()) throw validation("INVALID_SURFACE", "Yüzey bilgisi gerekli.", "surface")
-        if (request.eventType == RecommendationEventType.FEED_SERVED) {
-            throw validation("SERVER_ONLY_EVENT", "Sunum olayını yalnızca backend üretir.", "eventType")
+        if (request.eventType in SERVER_GENERATED) {
+            throw validation(
+                "SERVER_ONLY_EVENT",
+                "Bu olayı yalnızca backend üretir; istemcinin göndermesi gerekmez.",
+                "eventType",
+            )
+        }
+        val schemaVersion = validateSchemaVersion(request)
+        val platform = request.platform?.let {
+            EventPlatform.fromClient(it) ?: throw validation("INVALID_PLATFORM", "Platform bilgisi geçersiz.", "platform")
+        }
+        val appVersion = request.appVersion?.trim()?.takeIf(String::isNotBlank)?.let {
+            if (it.length > EventContract.MAX_APP_VERSION_LENGTH) {
+                throw validation("INVALID_APP_VERSION", "Uygulama sürümü çok uzun.", "appVersion")
+            }
+            it
         }
         val target = resolveTargetFeature(request)
         if (request.eventType !in setOf(RecommendationEventType.SESSION_STARTED, RecommendationEventType.INTEREST_SELECTED) && postId == null) {
@@ -91,7 +106,34 @@ class RecommendationService(
             targetFeature = target,
             occurredAt = occurredAt,
             receivedAt = receivedAt,
+            schemaVersion = schemaVersion,
+            appVersion = appVersion,
+            platform = platform,
         )
+    }
+
+    /**
+     * Gelecekten bir sürüm kabul edilmez: anlamını bilmediğimiz bir olayı
+     * yazmak, veriyi sonradan ayıklanamaz hâle getirir. Eski ama desteklenen
+     * sürümler kabul edilip loglanır; hangi istemci sürümünün ne kadar eski
+     * veri ürettiği `schema_version` kolonundan sorgulanabilir.
+     */
+    private fun validateSchemaVersion(request: RecommendationEventRequest): Int {
+        val version = request.schemaVersion
+        if (version < EventContract.OLDEST_SUPPORTED_VERSION || version > EventContract.CURRENT_VERSION) {
+            throw validation(
+                "UNSUPPORTED_SCHEMA_VERSION",
+                "Olay sözleşmesi sürümü desteklenmiyor: $version.",
+                "schemaVersion",
+            )
+        }
+        if (version < EventContract.CURRENT_VERSION) {
+            logger.info(
+                "Eski olay sözleşmesi sürümü: schemaVersion={} platform={} appVersion={}",
+                version, request.platform, request.appVersion,
+            )
+        }
+        return version
     }
 
     /**
@@ -111,6 +153,25 @@ class RecommendationService(
         }
         return topics.canonicalSlug(raw)
             ?: throw validation("UNKNOWN_TOPIC_FEATURE", "İlgi alanı katalogda yok.", "targetFeature")
+    }
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(RecommendationService::class.java)
+
+        /**
+         * Backend'in kendi işlemi içinde ürettiği olaylar.
+         *
+         * Beğeni, kaydetme ve şikâyet zaten backend'de yazılan işlemler;
+         * sinyali orada üretmek istemcinin ağı kesilse de kaybolmamasını
+         * sağlıyor. İstemci ayrıca göndermeye çalışırsa aynı etkileşim iki kez
+         * sayılırdı, o yüzden reddediliyor.
+         */
+        internal val SERVER_GENERATED = setOf(
+            RecommendationEventType.FEED_SERVED,
+            RecommendationEventType.CONTENT_LIKED,
+            RecommendationEventType.CONTENT_SAVED,
+            RecommendationEventType.CONTENT_REPORTED,
+        )
     }
 }
 

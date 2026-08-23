@@ -49,7 +49,40 @@ data class RecommendationEventRequest(
     val timezoneOffsetMinutes: Int,
     val targetFeature: String? = null,
     val occurredAt: String,
+    /**
+     * Olayı üreten istemcinin uyduğu sözleşme sürümü. Varsayılan 1, çünkü
+     * alanı hiç göndermeyen istemciler sözleşmenin ilk sürümüne göre yazılmış
+     * demektir.
+     */
+    val schemaVersion: Int = EventContract.OLDEST_SUPPORTED_VERSION,
+    val appVersion: String? = null,
+    val platform: String? = null,
 )
+
+/** Olay sözleşmesinin sürüm sınırları; ayrıntısı `docs/event-contract-v1.md`. */
+object EventContract {
+    const val CURRENT_VERSION = 2
+    const val OLDEST_SUPPORTED_VERSION = 1
+    const val MAX_APP_VERSION_LENGTH = 20
+}
+
+@Serializable
+enum class EventPlatform {
+    @SerialName("ios") IOS,
+    @SerialName("android") ANDROID,
+    @SerialName("web") WEB,
+
+    /** Sunucunun kendi ürettiği olaylar; istemci bu değeri gönderemez. */
+    @SerialName("backend") BACKEND;
+
+    /** Veritabanındaki `platform` kolonuna yazılan değer. */
+    val wireName: String get() = name.lowercase()
+
+    companion object {
+        fun fromClient(raw: String): EventPlatform? =
+            entries.firstOrNull { it.wireName == raw.trim().lowercase() && it != BACKEND }
+    }
+}
 
 @Serializable
 data class RecommendationEventBatchRequest(val events: List<RecommendationEventRequest>)
@@ -96,6 +129,9 @@ data class RecommendationEvent(
     val targetFeature: String?,
     val occurredAt: Instant,
     val receivedAt: Instant,
+    val schemaVersion: Int = EventContract.CURRENT_VERSION,
+    val appVersion: String? = null,
+    val platform: EventPlatform? = null,
 )
 
 data class RecommendationSignal(

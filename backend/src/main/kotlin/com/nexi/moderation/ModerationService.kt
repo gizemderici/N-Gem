@@ -4,7 +4,11 @@ import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.AvatarUrls
 import com.nexi.media.ObjectStorage
+import com.nexi.recommendations.RecommendationEventType
+import com.nexi.recommendations.RecommendationSink
+import com.nexi.recommendations.serverEvent
 import io.ktor.http.HttpStatusCode
+import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Instant
@@ -16,7 +20,10 @@ class ModerationService(
     private val users: UserLookup,
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
+    private val recommendations: RecommendationSink = RecommendationSink.NOOP,
 ) {
+    private val logger = LoggerFactory.getLogger(ModerationService::class.java)
+
     /** Kullanıcı adı ↔ kimlik çevirisi. Profil modülüne bağımlı kalmamak için dar bir arayüz. */
     fun interface UserLookup {
         fun idByUsername(username: String): UUID?
@@ -99,6 +106,16 @@ class ModerationService(
                 updatedAt = now,
             )
         )
+        // Şikâyet en güçlü olumsuz sinyal; istemcinin ayrıca bildirmesini
+        // beklemek onu kaybetmek demekti. Yalnızca ilk şikâyette ve yalnızca
+        // gönderiler için yazılır -- kullanıcı şikâyetinin sıralama karşılığı yok.
+        if (!alreadyReported && targetType == ReportTargetType.POST) {
+            runCatching {
+                recommendations.emit(
+                    listOf(serverEvent(reporterId, targetId, RecommendationEventType.CONTENT_REPORTED, "report", now))
+                )
+            }.onFailure { logger.warn("Could not record report signal: target={}", targetId, it) }
+        }
         return stored.toResponse(alreadyReported)
     }
 

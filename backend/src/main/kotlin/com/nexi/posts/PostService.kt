@@ -8,10 +8,12 @@ import com.nexi.notifications.NotificationTargetType
 import com.nexi.notifications.NotificationType
 import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.EmptyRecommendationRepository
+import com.nexi.recommendations.EventPlatform
 import com.nexi.recommendations.FeedRecommendationContext
 import com.nexi.recommendations.RecommendationEvent
 import com.nexi.recommendations.RecommendationEventType
 import com.nexi.recommendations.RecommendationRepository
+import com.nexi.recommendations.serverEvent
 import io.ktor.http.HttpStatusCode
 import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
@@ -156,6 +158,7 @@ class PostService(
                     targetFeature = null,
                     occurredAt = now,
                     receivedAt = now,
+                    platform = EventPlatform.BACKEND,
                 )
             }
         )
@@ -183,7 +186,8 @@ class PostService(
     fun setLike(userId: UUID, postId: UUID, active: Boolean): PostInteractionResponse {
         val details = repository.findDetails(postId, userId)
             ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
-        val count = repository.setLike(postId, userId, active, clock.instant())
+        val now = clock.instant()
+        val count = repository.setLike(postId, userId, active, now)
         // Begeniyi geri almak bildirim uretmez.
         if (active) {
             notifications.emit(
@@ -191,13 +195,42 @@ class PostService(
                 NotificationType.POST_LIKE, NotificationTargetType.POST, postId,
             )
         }
+        recordInteraction(userId, postId, RecommendationEventType.CONTENT_LIKED, active, details.likedByViewer, now)
         return PostInteractionResponse(postId.toString(), active, count)
     }
 
     fun setSave(userId: UUID, postId: UUID, active: Boolean): PostInteractionResponse {
-        ensureVisible(postId, userId)
-        val count = repository.setSave(postId, userId, active, clock.instant())
+        val details = repository.findDetails(postId, userId)
+            ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
+        val now = clock.instant()
+        val count = repository.setSave(postId, userId, active, now)
+        recordInteraction(userId, postId, RecommendationEventType.CONTENT_SAVED, active, details.savedByViewer, now)
         return PostInteractionResponse(postId.toString(), active, count)
+    }
+
+    /**
+     * Etkileşim sinyalini istemciden beklemeden burada yazıyoruz: beğeni zaten
+     * sunucuda işleniyor, olayı da burada üretmek uygulama kapansa bile
+     * kaybolmamasını sağlıyor.
+     *
+     * Yalnızca gerçek geçişte yazılır. Aksi hâlde arayüzün tekrar gönderdiği
+     * istek ya da çift dokunuş aynı beğeniyi birden çok kez öğretirdi.
+     */
+    private fun recordInteraction(
+        userId: UUID,
+        postId: UUID,
+        type: RecommendationEventType,
+        active: Boolean,
+        alreadyActive: Boolean,
+        now: Instant,
+    ) {
+        if (!active || alreadyActive) return
+        runCatching {
+            recommendationRepository.append(listOf(serverEvent(userId, postId, type, "post", now)))
+        }.onFailure {
+            // Sinyal kaybı etkileşimi geri almayı hak etmez; beğeni zaten yazıldı.
+            logger.warn("Could not record interaction signal: post={} type={}", postId, type, it)
+        }
     }
 
     private fun ensureVisible(postId: UUID, viewerId: UUID) {

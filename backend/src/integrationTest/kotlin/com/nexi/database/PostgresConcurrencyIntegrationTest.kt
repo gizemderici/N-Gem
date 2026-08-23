@@ -92,7 +92,7 @@ class PostgresConcurrencyIntegrationTest {
             }
         }
 
-        assertEquals((1..14).map(Int::toString), versions)
+        assertEquals((1..15).map(Int::toString), versions)
     }
 
     @Test

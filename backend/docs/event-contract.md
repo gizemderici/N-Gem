@@ -1,10 +1,21 @@
-# Öneri olayı sözleşmesi — sürüm 1
+# Öneri olayı sözleşmesi
 
 Bu belge `POST /api/v1/recommendations/events` uçunun kabul ettiği olayların
 adlarını ve **anlamlarını** sabitler. Backend, iOS ve Android aynı adı aynı şeyi
 kastederek kullanmak zorunda; eğitim verisi bu tablodan üretilecek.
 
-Sürüm: **1** · Yürürlük: AI Faz 0 · Durum: yürürlükte
+Geçerli sürüm: **2** · En eski desteklenen: **1**
+
+| Sürüm | Faz | Değişiklik |
+|---|---|---|
+| 1 | AI Faz 0 | Kanonik konu slug'ları; `feed_served` ile `content_impression` ayrıldı |
+| 2 | AI Faz 1 | `schemaVersion`, `appVersion`, `platform` alanları; beğeni/kaydetme/şikâyet sunucu üretimli oldu |
+
+İstemci `schemaVersion` göndermezse 1 varsayılır. Geçerli sürümden büyük bir
+değer `400 UNSUPPORTED_SCHEMA_VERSION` ile reddedilir — anlamını bilmediğimiz
+bir olayı yazmak veriyi sonradan ayıklanamaz hâle getirir. Eski ama desteklenen
+sürümler kabul edilip loglanır ve `recommendation_events.schema_version`
+kolonuna yazılır, böylece hangi istemci sürümünün ne ürettiği sorgulanabilir.
 
 ## Neden sürümlü
 
@@ -34,11 +45,11 @@ UNKNOWN_TOPIC_FEATURE` döner — sessizce kabul edilmez.
 | `content_impression` | istemci | Gönderi ekranda gerçekten görünür oldu | `postId` |
 | `content_view` | istemci | Kullanıcı gönderiyi görüntüledi | `postId`, `dwellMillis` |
 | `content_complete` | istemci | Video/içerik sonuna kadar tüketildi | `postId`, `completionRatio` |
-| `content_liked` | istemci | Beğendi | `postId` |
-| `content_saved` | istemci | Kaydetti | `postId` |
+| `content_liked` | **yalnızca backend** | Beğendi | `postId` |
+| `content_saved` | **yalnızca backend** | Kaydetti | `postId` |
 | `content_shared` | istemci | Paylaşımı tamamladı | `postId` |
 | `content_hidden` | istemci | Gönderiyi gizledi (güçlü olumsuz) | `postId` |
-| `content_reported` | istemci | Şikâyet etti (en güçlü olumsuz) | `postId` |
+| `content_reported` | **yalnızca backend** | Şikâyet etti (en güçlü olumsuz) | `postId` |
 | `recommendation_reason_opened` | istemci | "Neden bu içerik" açıklamasını açtı | `postId` |
 
 ### `feed_served` ile `content_impression` farkı
@@ -56,6 +67,28 @@ kaynağıydı.
 İkisi de tercih kanıtı sayılmaz; sıralama ödülleri sıfırdır. Ayrı tutulmalarının
 sebebi eğitim verisi: "gösterildi ama etkileşim yok" negatif örneği ancak gerçek
 gösterimle anlamlıdır, sunum kaydıyla değil.
+
+### Sunucu üretimli etkileşimler
+
+`content_liked`, `content_saved` ve `content_reported` backend'in kendi işlemi
+içinde yazılır. Beğeni zaten sunucuda işleniyor; sinyali orada üretmek uygulama
+kapansa ya da ağ kesilse bile kaybolmamasını sağlıyor. İstemci ayrıca
+göndermeye çalışırsa aynı etkileşim iki kez sayılacağı için `400
+SERVER_ONLY_EVENT` döner.
+
+Sinyal yalnızca **gerçek geçişte** yazılır: beğenilmemişken beğenildiğinde.
+Arayüzün tekrarladığı istek ya da çift dokunuş aynı beğeniyi ikinci kez
+öğretmez; beğeniyi geri alıp yeniden beğenmek ise yeni bir sinyaldir.
+
+## İstemci kimliği
+
+| Alan | Zorunlu | Açıklama |
+|---|---|---|
+| `schemaVersion` | hayır (varsayılan 1) | İstemcinin uyduğu sözleşme sürümü |
+| `platform` | hayır | `ios`, `android` ya da `web`. `backend` istemciden kabul edilmez |
+| `appVersion` | hayır | En fazla 20 karakter |
+
+Sunucunun ürettiği olaylarda `platform` her zaman `backend`'tir.
 
 ## Doğrulama kuralları
 
@@ -75,7 +108,10 @@ Backend her olayı reddedebilir; sessiz kabul yoktur.
 | `MISSING_TARGET_FEATURE` | `interest_selected` olayında hedef yok |
 | `UNKNOWN_TOPIC_FEATURE` | Hedef katalogda yok |
 | `MISSING_POST_ID` | İçerik olayında gönderi yok |
-| `SERVER_ONLY_EVENT` | İstemci `feed_served` göndermeye çalıştı |
+| `SERVER_ONLY_EVENT` | İstemci sunucu üretimli bir olay göndermeye çalıştı |
+| `UNSUPPORTED_SCHEMA_VERSION` | `schemaVersion` desteklenen aralığın dışında |
+| `INVALID_PLATFORM` | `platform` tanınmıyor ya da `backend` |
+| `INVALID_APP_VERSION` | `appVersion` 20 karakterden uzun |
 | `POST_NOT_FOUND` | Olayın gönderisi yok ya da görülemiyor |
 
 ## Tekrar gönderim
@@ -85,8 +121,3 @@ Aynı olayı yeniden göndermek güvenlidir; yanıttaki `accepted` yalnızca ilk
 yazımı sayar. İstemci kuyruğu bu yüzden "başarılı yanıt alana kadar sakla,
 sonra sil" mantığıyla çalışabilir.
 
-## Sonraki sürümde gelecekler (AI Faz 1)
-
-`schemaVersion`, `appVersion` ve `platform` alanları zorunlu hâle gelecek ve
-`recommendation_events` tablosuna yazılacak. Bunlar tek migration ile birlikte
-geleceği için Faz 0'da yalnızca bu belgede sabitlendi.
