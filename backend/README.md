@@ -45,6 +45,49 @@ Testler:
 .\gradlew.bat clean test
 ```
 
+JDK kurulu değilse testler Docker üzerinden de koşturulabilir. Kalıcı bir Gradle
+önbelleği bağlamak süreyi 10 dakikadan ~1 dakikaya indirir:
+
+```bash
+docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app gradle:8.14-jdk21 gradle test --no-daemon
+```
+
+## Uçtan uca doğrulama
+
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 56 kontrol
+çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
+yükleme (görsel ve video), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
+takip, takip içeriğinin akışa girmesi ve öneri olayları.
+
+```bash
+docker compose up -d --build
+./scripts/e2e-smoke.sh
+```
+
+### Migration uyarısı — eski `V4` veritabanları
+
+Öneri olayları eklenirken migration'lar yeniden numaralandı:
+
+| Eski | Yeni |
+|---|---|
+| — | `V4__create_recommendation_events.sql` |
+| `V4__create_topics.sql` | `V5__create_topics.sql` |
+| `V5__create_comments.sql` | `V6__create_comments.sql` |
+| `V6__create_follows.sql` | `V7__create_follows.sql` |
+
+`V1–V3`'te kalmış bir veritabanı sorunsuz `V7`'ye yükseliyor (test edildi).
+Ancak **eski `V4` (topics) migration'ını çalıştırmış** bir veritabanı
+yükseltilemez; Flyway `checksum mismatch for migration version 4` ile durur.
+
+Böyle bir veritabanı varsa tek çözüm sıfırdan kurmaktır:
+
+```bash
+docker compose down -v && docker compose up -d --build
+```
+
+Üretim ve staging henüz kurulmadığı için bugün etkisi yok. Staging kurulduktan
+sonra numaralandırma **kesinlikle değiştirilmemelidir**.
+
 ## Authentication akışı
 
 ### 1. Kayıt
