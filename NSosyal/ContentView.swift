@@ -8,9 +8,9 @@
 import SwiftUI
 
 struct ContentView: View {
-    @AppStorage("nsosyal.authentication.completed") private var hasAuthenticated = false
     @AppStorage("nsosyal.onboarding.completed") private var hasCompletedOnboarding = false
     @StateObject private var store = AppStore()
+    @StateObject private var authenticationStore = AuthenticationStore()
 
     private var skipsAuthenticationForDevelopment: Bool {
         ProcessInfo.processInfo.arguments.contains("-skipAuthentication")
@@ -23,16 +23,16 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            if !hasAuthenticated && !skipsAuthenticationForDevelopment {
-                AuthenticationView {
-                    withAnimation(NSTheme.gentleSpring) {
-                        hasAuthenticated = true
-                    }
-                }
+            if authenticationStore.isRestoringSession && !skipsAuthenticationForDevelopment {
+                ProgressView("Oturum kontrol ediliyor…")
+                    .tint(NSTheme.blue)
+            } else if !authenticationStore.isAuthenticated && !skipsAuthenticationForDevelopment {
+                AuthenticationView(authenticationStore: authenticationStore)
                 .transition(.opacity)
             } else if hasCompletedOnboarding || skipsOnboardingForDevelopment {
                 MainTabView()
                     .environmentObject(store)
+                    .environmentObject(authenticationStore)
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
             } else {
                 OnboardingView {
@@ -41,10 +41,14 @@ struct ContentView: View {
                     }
                 }
                 .environmentObject(store)
+                .environmentObject(authenticationStore)
                 .transition(.opacity)
             }
         }
         .tint(NSTheme.ink)
         .preferredColorScheme(.light)
+        .task {
+            await authenticationStore.restoreSession()
+        }
     }
 }

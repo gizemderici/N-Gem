@@ -2,8 +2,8 @@ import SwiftUI
 
 struct PersonalizationSettingsView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var authenticationStore: AuthenticationStore
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("nsosyal.authentication.completed") private var hasAuthenticated = false
 
     @State private var personalizationEnabled = true
     @State private var activityNotifications = true
@@ -102,8 +102,10 @@ struct PersonalizationSettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Çıkış yap", role: .destructive) {
-                hasAuthenticated = false
-                dismiss()
+                Task {
+                    await authenticationStore.signOut()
+                    dismiss()
+                }
             }
             Button("Vazgeç", role: .cancel) {}
         } message: {

@@ -17,6 +17,7 @@ private enum VerificationPurpose: Equatable {
 
 struct AuthenticationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject var authenticationStore: AuthenticationStore
 
     @State private var screen: AuthenticationScreen = .welcome
     @State private var verificationPurpose: VerificationPurpose = .newAccount
@@ -29,8 +30,7 @@ struct AuthenticationView: View {
     @State private var acceptsTerms = false
     @State private var errorMessage: String?
     @State private var infoMessage: String?
-
-    let onAuthenticated: () -> Void
+    @State private var isSubmitting = false
 
     var body: some View {
         ZStack {
@@ -145,12 +145,12 @@ struct AuthenticationView: View {
                 dividerLabel("veya")
 
                 Button {
-                    onAuthenticated()
+                    // Apple Sign in capability ve backend doğrulaması eklendiğinde etkinleştirilecek.
                 } label: {
                     HStack(spacing: 9) {
                         Image(systemName: "apple.logo")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("Apple ile devam et")
+                        Text("Apple ile devam et • Yakında")
                             .font(.system(size: 15, weight: .semibold))
                     }
                     .foregroundStyle(NSTheme.ink)
@@ -160,6 +160,8 @@ struct AuthenticationView: View {
                     .overlay { Capsule().stroke(NSTheme.border, lineWidth: 1) }
                 }
                 .pressScale()
+                .disabled(true)
+                .opacity(0.6)
             }
             .padding(.horizontal, NSTheme.horizontalPadding)
 
@@ -216,7 +218,8 @@ struct AuthenticationView: View {
             feedbackMessage
 
             Button("Giriş yap", action: submitSignIn)
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(isEnabled: !isSubmitting))
+                .disabled(isSubmitting)
 
             dividerLabel("veya")
 
@@ -298,7 +301,8 @@ struct AuthenticationView: View {
             feedbackMessage
 
             Button("Hesap oluştur", action: submitSignUp)
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(isEnabled: !isSubmitting))
+                .disabled(isSubmitting)
 
             authSwitchPrompt(text: "Zaten hesabın var mı?", actionTitle: "Giriş yap") {
                 go(to: .signIn)
@@ -330,7 +334,8 @@ struct AuthenticationView: View {
             feedbackMessage
 
             Button("Doğrulama kodu gönder", action: submitForgotPassword)
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(isEnabled: !isSubmitting))
+                .disabled(isSubmitting)
         }
     }
 
@@ -351,17 +356,17 @@ struct AuthenticationView: View {
             feedbackMessage
 
             Button("Kodu doğrula", action: submitVerification)
-                .buttonStyle(PrimaryButtonStyle(isEnabled: verificationCode.count == 6))
-                .disabled(verificationCode.count != 6)
+                .buttonStyle(PrimaryButtonStyle(isEnabled: verificationCode.count == 6 && !isSubmitting))
+                .disabled(verificationCode.count != 6 || isSubmitting)
 
             HStack(spacing: 5) {
                 Text("Kod gelmedi mi?")
                     .foregroundStyle(NSTheme.mutedInk)
                 Button("Tekrar gönder") {
-                    infoMessage = "Yeni doğrulama kodu gönderildi."
-                    errorMessage = nil
+                    resendVerificationCode()
                 }
                 .foregroundStyle(NSTheme.blue)
+                .disabled(isSubmitting)
             }
             .font(.system(size: 12, weight: .semibold))
             .frame(maxWidth: .infinity)
@@ -405,7 +410,8 @@ struct AuthenticationView: View {
             feedbackMessage
 
             Button("Şifreyi yenile", action: submitResetPassword)
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(isEnabled: !isSubmitting))
+                .disabled(isSubmitting)
         }
     }
 
@@ -549,12 +555,12 @@ struct AuthenticationView: View {
 
     private var appleButton: some View {
         Button {
-            onAuthenticated()
+            // Apple Sign in capability ve backend doğrulaması eklendiğinde etkinleştirilecek.
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: "apple.logo")
                     .font(.system(size: 18, weight: .semibold))
-                Text("Apple ile devam et")
+                Text("Apple ile devam et • Yakında")
                     .font(.system(size: 15, weight: .semibold))
             }
             .foregroundStyle(NSTheme.ink)
@@ -564,6 +570,8 @@ struct AuthenticationView: View {
             .overlay { Capsule().stroke(NSTheme.strongBorder, lineWidth: 1) }
         }
         .pressScale()
+        .disabled(true)
+        .opacity(0.6)
     }
 
     private func dividerLabel(_ text: String) -> some View {
@@ -603,7 +611,25 @@ struct AuthenticationView: View {
             errorMessage = "Şifren en az 6 karakter olmalı."
             return
         }
-        onAuthenticated()
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            do {
+                try await authenticationStore.signIn(email: email, password: password)
+                password = ""
+            } catch let error as APIClientError {
+                if case let .server(_, response) = error, response.code == "EMAIL_NOT_VERIFIED" {
+                    verificationPurpose = .newAccount
+                    verificationCode = ""
+                    go(to: .verification)
+                    infoMessage = "E-postanı doğruladıktan sonra giriş yapabilirsin."
+                } else {
+                    errorMessage = error.localizedDescription
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func submitSignUp() {
@@ -629,9 +655,27 @@ struct AuthenticationView: View {
             return
         }
 
-        verificationPurpose = .newAccount
-        verificationCode = ""
-        go(to: .verification)
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            do {
+                let response = try await authenticationStore.register(
+                    fullName: fullName,
+                    username: username,
+                    email: email,
+                    password: password,
+                    acceptedTerms: acceptsTerms
+                )
+                verificationPurpose = .newAccount
+                verificationCode = response.developmentCode ?? ""
+                go(to: .verification)
+                infoMessage = response.developmentCode == nil
+                    ? "Doğrulama kodu e-posta adresine gönderildi."
+                    : "Geliştirme kodu otomatik olarak dolduruldu."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func submitForgotPassword() {
@@ -640,9 +684,21 @@ struct AuthenticationView: View {
             errorMessage = "Hesabına bağlı geçerli e-posta adresini yazmalısın."
             return
         }
-        verificationPurpose = .passwordReset
-        verificationCode = ""
-        go(to: .verification)
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            do {
+                let response = try await authenticationStore.requestPasswordReset(email: email)
+                verificationPurpose = .passwordReset
+                verificationCode = response.developmentCode ?? ""
+                go(to: .verification)
+                infoMessage = response.developmentCode == nil
+                    ? "Doğrulama kodu e-posta adresine gönderildi."
+                    : "Geliştirme kodu otomatik olarak dolduruldu."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func submitVerification() {
@@ -653,7 +709,16 @@ struct AuthenticationView: View {
         }
 
         if verificationPurpose == .newAccount {
-            onAuthenticated()
+            isSubmitting = true
+            Task {
+                defer { isSubmitting = false }
+                do {
+                    try await authenticationStore.verifyEmail(email: email, code: verificationCode)
+                    password = ""
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
         } else {
             password = ""
             repeatedPassword = ""
@@ -672,10 +737,48 @@ struct AuthenticationView: View {
             return
         }
 
-        password = ""
-        repeatedPassword = ""
-        go(to: .signIn)
-        infoMessage = "Şifren yenilendi. Yeni şifrenle giriş yapabilirsin."
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            do {
+                try await authenticationStore.resetPassword(
+                    email: email,
+                    code: verificationCode,
+                    newPassword: password
+                )
+                password = ""
+                repeatedPassword = ""
+                verificationCode = ""
+                go(to: .signIn)
+                infoMessage = "Şifren yenilendi. Yeni şifrenle giriş yapabilirsin."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func resendVerificationCode() {
+        clearFeedback()
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            do {
+                let response: VerificationDispatchResponse
+                if verificationPurpose == .newAccount {
+                    response = try await authenticationStore.resendVerification(email: email)
+                } else {
+                    response = try await authenticationStore.requestPasswordReset(email: email)
+                }
+                if let developmentCode = response.developmentCode {
+                    verificationCode = developmentCode
+                    infoMessage = "Yeni geliştirme kodu otomatik olarak dolduruldu."
+                } else {
+                    infoMessage = "Yeni doğrulama kodu gönderildi."
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func navigateBack() {
