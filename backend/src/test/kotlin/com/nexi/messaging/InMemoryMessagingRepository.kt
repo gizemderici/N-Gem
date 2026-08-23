@@ -71,6 +71,10 @@ internal class InMemoryMessagingRepository(private val baseTime: Instant) : Mess
 
     override fun isMember(conversationId: UUID, userId: UUID) = (conversationId to userId) in members
 
+    override fun counterpartId(conversationId: UUID, viewerId: UUID): UUID? = members.keys
+        .firstOrNull { it.first == conversationId && it.second != viewerId }
+        ?.second
+
     override fun counterpart(conversationId: UUID, viewerId: UUID): PostAuthorResponse? {
         val otherId = members.keys
             .firstOrNull { it.first == conversationId && it.second != viewerId }

@@ -29,6 +29,9 @@ interface MessagingRepository {
     /** Konuşmadaki karşı taraf; engelliyse `null`. */
     fun counterpart(conversationId: UUID, viewerId: UUID): PostAuthorResponse?
 
+    /** Karşı tarafın kimliği; engelden bağımsız, bildirim üretmek için. */
+    fun counterpartId(conversationId: UUID, viewerId: UUID): UUID?
+
     fun conversations(viewerId: UUID, cursor: MessageCursor?, limit: Int): List<ConversationSummary>
     fun totalUnread(viewerId: UUID): Long
 
@@ -124,6 +127,19 @@ class JdbcMessagingRepository(private val dataSource: DataSource) : MessagingRep
                 statement.setObject(5, viewerId)
                 statement.executeQuery().use { results ->
                     if (results.next()) results.toAuthor() else null
+                }
+            }
+        }
+
+    override fun counterpartId(conversationId: UUID, viewerId: UUID): UUID? =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT user_id FROM conversation_members WHERE conversation_id = ? AND user_id <> ? LIMIT 1"
+            ).use { statement ->
+                statement.setObject(1, conversationId)
+                statement.setObject(2, viewerId)
+                statement.executeQuery().use { results ->
+                    if (results.next()) results.getObject("user_id", UUID::class.java) else null
                 }
             }
         }

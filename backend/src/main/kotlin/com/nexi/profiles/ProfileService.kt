@@ -4,6 +4,9 @@ import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.AvatarUrls
 import com.nexi.media.ObjectStorage
+import com.nexi.notifications.NotificationSink
+import com.nexi.notifications.NotificationTargetType
+import com.nexi.notifications.NotificationType
 import io.ktor.http.HttpStatusCode
 import java.nio.charset.StandardCharsets
 import java.time.Clock
@@ -15,6 +18,7 @@ class ProfileService(
     private val repository: ProfileRepository,
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
+    private val notifications: NotificationSink = NotificationSink.NOOP,
 ) {
     fun profile(viewerId: UUID, username: String): UserProfileResponse =
         repository.findByUsername(username, viewerId)?.toResponse(storage) ?: throw userNotFound()
@@ -89,6 +93,10 @@ class ProfileService(
         }
 
         val followerCount = repository.setFollow(followerId, target.id, active, clock.instant())
+        // Takibi bırakmak bildirim üretmez; yalnızca yeni takip.
+        if (active) {
+            notifications.emit(target.id, followerId, NotificationType.FOLLOW, NotificationTargetType.USER, followerId)
+        }
         return FollowResponse(username = target.username, following = active, followerCount = followerCount)
     }
 

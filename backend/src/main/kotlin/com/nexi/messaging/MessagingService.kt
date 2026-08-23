@@ -4,6 +4,9 @@ import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.MediaAsset
 import com.nexi.media.ObjectStorage
+import com.nexi.notifications.NotificationSink
+import com.nexi.notifications.NotificationTargetType
+import com.nexi.notifications.NotificationType
 import com.nexi.posts.withAvatar
 import io.ktor.http.HttpStatusCode
 import java.nio.charset.StandardCharsets
@@ -18,6 +21,7 @@ class MessagingService(
     private val users: UserLookup,
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
+    private val notifications: NotificationSink = NotificationSink.NOOP,
 ) {
     /** Kullanıcı adını kimliğe çevirir; engelli kullanıcı için `null` döner. */
     fun interface UserLookup {
@@ -125,6 +129,15 @@ class MessagingService(
                 createdAt = now,
             )
         ) ?: throw ApiException(HttpStatusCode.InternalServerError, "MESSAGE_SEND_FAILED", "Mesaj gönderilemedi.")
+
+        // Konuşma başına tek bildirim: UNIQUE kısıtı arka arkaya gelen
+        // mesajlarda aynı satırı tazeliyor, bildirim yığılmıyor.
+        repository.counterpartId(conversationId, viewerId)?.let { other ->
+            notifications.emit(
+                other, viewerId,
+                NotificationType.MESSAGE, NotificationTargetType.CONVERSATION, conversationId,
+            )
+        }
 
         return details.toResponse(viewerId)
     }

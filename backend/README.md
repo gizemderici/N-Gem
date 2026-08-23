@@ -54,10 +54,10 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 115 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 127 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
-takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, engelleme/şikâyet ve öneri olayları.
+takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, bildirimler, engelleme/şikâyet ve öneri olayları.
 
 ```bash
 docker compose up -d --build
@@ -496,6 +496,47 @@ yok oluyor ve takip grafiği sınırlı; yine de sorgunun büyümemesi için tav
 `processing_status` ikisi de `READY`) ve kullanıcıya ait olması gerekir. Bir
 medya yalnızca tek bir yerde kullanılabilir: gönderide kullanılan hikâyeye,
 hikâyede kullanılan başka bir hikâyeye eklenemez (`MEDIA_ALREADY_ATTACHED`).
+
+## Bildirimler
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/api/v1/notifications` | Yeniden eskiye, imleçli, `unreadCount` ile |
+| `GET` | `/api/v1/notifications/unread-count` | Yalnızca sayaç |
+| `PUT` | `/api/v1/notifications/read-all` | Hepsini okundu işaretler |
+| `PUT` | `/api/v1/notifications/{id}/read` | Tekini okundu işaretler |
+| `DELETE` | `/api/v1/notifications/{id}` | Bildirimi siler |
+
+**Bugün üretilen türler:** `FOLLOW`, `POST_LIKE`, `POST_COMMENT`, `MESSAGE`.
+`SYSTEM` tanımlı ama henüz üreteni yok.
+
+Planda geçen "yorum cevabı", "hikâye etkileşimi" ve "şikâyet sonucu" türleri
+eklenmedi çünkü dayandıkları özellikler yok: yorumlarda iç içe yanıt (Faz 4'te
+bilinçli olarak kapsam dışı), hikâyelerde tepki (yalnızca görüntüleme var ve
+görüntüleyen listesi zaten mevcut), moderatör uçları (Faz 9'da sonraya bırakıldı).
+
+### Tekrarlanan olay yığılmıyor
+
+`(alıcı, aktör, tür, hedef)` dörtlüsü üzerinde `UNIQUE NULLS NOT DISTINCT` kısıtı
+var. Aynı kişi aynı gönderiyi beğenip kaldırıp tekrar beğenirse ya da arka arkaya
+mesaj gönderirse **tek satır** tazelenir ve okunmamışa döner — yeni satır açılmaz.
+
+`NULLS NOT DISTINCT` (PostgreSQL 15+) olmadan hedefsiz bildirimlerde (takip)
+NULL'lar birbirinden farklı sayılır ve kısıt işlemezdi.
+
+### Diğer kurallar
+
+- **Kendi eylemin bildirim üretmez** — `NotificationSink` bunu tek yerde eliyor.
+- **Engellenen kullanıcıların bildirimleri** ne listede ne sayaçta görünür.
+- **Takibi bırakmak** ya da beğeniyi geri almak bildirim üretmez; yalnızca
+  eylemin kendisi.
+- Bildirim yazımı **ikincil bir yan etki**: hata olursa yutulur ve loglanır,
+  asıl işlem (beğeni, yorum, mesaj) düşmez.
+- `NOTIFICATION_RETENTION_DAYS` (varsayılan 30) süresini geçen bildirimler
+  saatlik temizlik işinde siliniyor.
+
+Push bildirimi henüz yok; cihaz jetonu sistemi eklendiğinde aynı üretim
+noktalarından beslenebilir.
 
 ## Mesajlaşma
 

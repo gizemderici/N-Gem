@@ -3,6 +3,9 @@ package com.nexi.comments
 import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.ObjectStorage
+import com.nexi.notifications.NotificationSink
+import com.nexi.notifications.NotificationTargetType
+import com.nexi.notifications.NotificationType
 import io.ktor.http.HttpStatusCode
 import java.nio.charset.StandardCharsets
 import java.time.Clock
@@ -14,6 +17,7 @@ class CommentService(
     private val repository: CommentRepository,
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
+    private val notifications: NotificationSink = NotificationSink.NOOP,
 ) {
     fun create(authorId: UUID, postId: UUID, request: CreateCommentRequest): CommentResponse {
         val body = request.text.trim()
@@ -34,6 +38,11 @@ class CommentService(
                 updatedAt = now,
             )
         ) ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
+
+        // Kendi gönderine yorum yazmak bildirim üretmez; sink bunu kendisi eliyor.
+        repository.postOwner(postId)?.let { owner ->
+            notifications.emit(owner, authorId, NotificationType.POST_COMMENT, NotificationTargetType.POST, postId)
+        }
 
         return details.toResponse(storage, deletableByMe = true)
     }

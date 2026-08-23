@@ -21,6 +21,9 @@ import com.nexi.media.MediaService
 import com.nexi.moderation.JdbcModerationRepository
 import com.nexi.moderation.ModerationService
 import com.nexi.moderation.moderationRoutes
+import com.nexi.notifications.JdbcNotificationRepository
+import com.nexi.notifications.NotificationService
+import com.nexi.notifications.notificationRoutes
 import com.nexi.messaging.JdbcMessagingRepository
 import com.nexi.messaging.MessagingService
 import com.nexi.messaging.messagingRoutes
@@ -72,6 +75,9 @@ import java.time.Duration
 
 private const val HEALTH_CHECK_TIMEOUT_SECONDS = 2
 private val SWEEP_INTERVAL_MILLIS = Duration.ofHours(1).toMillis()
+private const val NOTIFICATION_SWEEP_BATCH = 1_000
+
+private fun clockNow(): java.time.Instant = java.time.Instant.now()
 
 fun Application.module() {
     val config = AppConfig.fromEnvironment()
@@ -92,27 +98,33 @@ fun Application.module() {
     val recommendationRepository = JdbcRecommendationRepository(dataSource)
     val ranker = ContextualRanker()
 
+    // Bildirim üreten servislerden önce kurulmalı; hepsi bunu alıyor.
+    val notificationRepository = JdbcNotificationRepository(dataSource)
+    val notificationService = NotificationService(notificationRepository, objectStorage)
+
     val mediaService = MediaService(mediaRepository, objectStorage, config.storage)
     val postService = PostService(
         repository = postRepository,
         storage = objectStorage,
         recommendationRepository = recommendationRepository,
         ranker = ranker,
+        notifications = notificationService,
     )
     val recommendationService = RecommendationService(
         repository = recommendationRepository,
         postRepository = postRepository,
         ranker = ranker,
     )
-    val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage)
+    val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage, notifications = notificationService)
     val profileRepository = JdbcProfileRepository(dataSource)
-    val profileService = ProfileService(profileRepository, objectStorage)
+    val profileService = ProfileService(profileRepository, objectStorage, notifications = notificationService)
     val storyRepository = JdbcStoryRepository(dataSource)
     val storyService = StoryService(storyRepository, objectStorage)
     val messagingService = MessagingService(
         repository = JdbcMessagingRepository(dataSource),
         users = { username, viewerId -> profileRepository.findByUsername(username, viewerId)?.id },
         storage = objectStorage,
+        notifications = notificationService,
     )
     val moderationService = ModerationService(
         repository = JdbcModerationRepository(dataSource),
@@ -132,6 +144,10 @@ fun Application.module() {
                 .onFailure { appLogger.warn("Abandoned upload sweep failed", it) }
             runCatching { storyJanitor.sweepExpired() }
                 .onFailure { appLogger.warn("Expired story sweep failed", it) }
+            runCatching {
+                val cutoff = clockNow().minus(Duration.ofDays(config.notificationRetentionDays))
+                notificationRepository.deleteOlderThan(cutoff, NOTIFICATION_SWEEP_BATCH)
+            }.onFailure { appLogger.warn("Notification retention sweep failed", it) }
             delay(SWEEP_INTERVAL_MILLIS)
         }
     }
@@ -219,6 +235,7 @@ fun Application.module() {
         moderationRoutes(moderationService)
         storyRoutes(storyService)
         messagingRoutes(messagingService)
+        notificationRoutes(notificationService)
         topicRoutes(topicService)
         feedRoutes(feedService)
     }

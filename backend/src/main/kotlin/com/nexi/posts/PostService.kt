@@ -3,6 +3,9 @@ package com.nexi.posts
 import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.ObjectStorage
+import com.nexi.notifications.NotificationSink
+import com.nexi.notifications.NotificationTargetType
+import com.nexi.notifications.NotificationType
 import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.EmptyRecommendationRepository
 import com.nexi.recommendations.FeedRecommendationContext
@@ -25,6 +28,7 @@ class PostService(
     private val clock: Clock = Clock.systemUTC(),
     private val recommendationRepository: RecommendationRepository = EmptyRecommendationRepository,
     private val ranker: ContextualRanker = ContextualRanker(),
+    private val notifications: NotificationSink = NotificationSink.NOOP,
 ) {
     private val logger = LoggerFactory.getLogger(PostService::class.java)
     private val mediaUrlExpiry = Duration.ofMinutes(15)
@@ -174,8 +178,16 @@ class PostService(
     }
 
     fun setLike(userId: UUID, postId: UUID, active: Boolean): PostInteractionResponse {
-        ensureVisible(postId, userId)
+        val details = repository.findDetails(postId, userId)
+            ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
         val count = repository.setLike(postId, userId, active, clock.instant())
+        // Begeniyi geri almak bildirim uretmez.
+        if (active) {
+            notifications.emit(
+                details.post.ownerId, userId,
+                NotificationType.POST_LIKE, NotificationTargetType.POST, postId,
+            )
+        }
         return PostInteractionResponse(postId.toString(), active, count)
     }
 

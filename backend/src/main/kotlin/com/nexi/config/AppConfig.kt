@@ -15,6 +15,8 @@ data class AppConfig(
     val trustProxyHeaders: Boolean = false,
     /** Yarım kalan yüklemelerin ne kadar sonra temizleneceği. */
     val abandonedUploadTtlHours: Long = 24,
+    /** Bu süreden eski bildirimler temizlenir. */
+    val notificationRetentionDays: Long = 30,
 ) {
     val isProduction: Boolean get() = environment.equals("production", ignoreCase = true)
 
@@ -57,6 +59,7 @@ data class AppConfig(
                     env.boolean("EXPOSE_DEVELOPMENT_CODES", true),
                 trustProxyHeaders = env.boolean("TRUST_PROXY_HEADERS", false),
                 abandonedUploadTtlHours = env.long("ABANDONED_UPLOAD_TTL_HOURS", 24),
+                notificationRetentionDays = env.long("NOTIFICATION_RETENTION_DAYS", 30),
             )
         }
     }

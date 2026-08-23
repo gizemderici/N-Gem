@@ -523,6 +523,52 @@ UNBLK=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/block")
 PROFBACK=$(ca "$TOK_A" "$BASE/api/v1/users/$USER_B")
 [ "$(printf '%s' "$PROFBACK" | field username)" = "$USER_B" ] && ok "engel kalkinca profil geri geldi" || bad "profil geri gelmedi" "$PROFBACK"
 
+# -------------------------------------------------------------- 11d) Bildirimler
+step "11d) Bildirimler"
+
+# B'nin bildirimleri: A takip etti, begendi, yorum yazdi, mesaj gonderdi.
+# (Bu eylemler onceki adimlarda gerceklesti; simdi B'nin kutusuna bakiyoruz.)
+NOTIF=$(ca "$TOK_B" "$BASE/api/v1/notifications")
+printf '%s' "$NOTIF" | grep -q '"FOLLOW"' && ok "takip bildirimi uretildi" || bad "FOLLOW bildirimi" "$(printf '%s' "$NOTIF" | head -c 300)"
+printf '%s' "$NOTIF" | grep -q '"POST_COMMENT"' && ok "yorum bildirimi uretildi" || bad "POST_COMMENT bildirimi" "$(printf '%s' "$NOTIF" | head -c 300)"
+printf '%s' "$NOTIF" | grep -q '"MESSAGE"' && ok "mesaj bildirimi uretildi" || bad "MESSAGE bildirimi" "$(printf '%s' "$NOTIF" | head -c 300)"
+printf '%s' "$NOTIF" | grep -q "\"username\":\"$USER_A\"" && ok "bildirimde aktor bilgisi var" || bad "aktor" "$(printf '%s' "$NOTIF" | head -c 300)"
+
+# Begeni bildirimi: A, B'nin gonderisini begensin
+ca "$TOK_A" -X PUT "$BASE/api/v1/posts/$PID_B/like" >/dev/null
+NOTIF2=$(ca "$TOK_B" "$BASE/api/v1/notifications")
+printf '%s' "$NOTIF2" | grep -q '"POST_LIKE"' && ok "begeni bildirimi uretildi" || bad "POST_LIKE bildirimi" "$(printf '%s' "$NOTIF2" | head -c 300)"
+
+# Tekrarlanan olay yigilmamali
+BEFORE_N=$(printf '%s' "$NOTIF2" | grep -o '"POST_LIKE"' | wc -l | tr -d ' ')
+ca "$TOK_A" -X DELETE "$BASE/api/v1/posts/$PID_B/like" >/dev/null
+ca "$TOK_A" -X PUT "$BASE/api/v1/posts/$PID_B/like" >/dev/null
+AFTER_N=$(ca "$TOK_B" "$BASE/api/v1/notifications" | grep -o '"POST_LIKE"' | wc -l | tr -d ' ')
+[ "$BEFORE_N" = "$AFTER_N" ] && ok "tekrar begeni bildirim yigmadi ($AFTER_N)" || bad "bildirim yigilmasi" "$BEFORE_N -> $AFTER_N"
+
+# Kendi eylemi bildirim uretmemeli
+ca "$TOK_B" -X PUT "$BASE/api/v1/posts/$PID_B/like" >/dev/null
+SELFN=$(ca "$TOK_B" "$BASE/api/v1/notifications" | grep -o "\"username\":\"$USER_B\"" | wc -l | tr -d ' ')
+[ "$SELFN" = "0" ] && ok "kendi eylemi bildirim uretmedi" || bad "kendi bildirimi" "$SELFN adet"
+
+# Okunmamis sayaci
+UNREAD=$(ca "$TOK_B" "$BASE/api/v1/notifications/unread-count")
+[ "$(printf '%s' "$UNREAD" | num unreadCount)" -gt 0 ] && ok "okunmamis sayaci calisiyor" || bad "okunmamis sayaci" "$UNREAD"
+
+NID=$(printf '%s' "$NOTIF2" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+ONEREAD=$(ca "$TOK_B" -X PUT "$BASE/api/v1/notifications/$NID/read")
+printf '%s' "$ONEREAD" | grep -q '"unreadCount"' && ok "tek bildirim okundu isaretlendi" || bad "tekli okuma" "$ONEREAD"
+
+ALLREAD=$(ca "$TOK_B" -X PUT "$BASE/api/v1/notifications/read-all")
+[ "$(printf '%s' "$ALLREAD" | num unreadCount)" = "0" ] && ok "hepsi okundu isaretlendi" || bad "toplu okuma" "$ALLREAD"
+
+DELN=$(ca "$TOK_B" -X DELETE "$BASE/api/v1/notifications/$NID")
+printf '%s' "$DELN" | grep -q "silindi" && ok "bildirim silindi" || bad "bildirim silme" "$DELN"
+
+# Baskasinin bildirimi silinemez
+OTHERDEL=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/notifications/$NID")
+[ "$(printf '%s' "$OTHERDEL" | field code)" = "NOTIFICATION_NOT_FOUND" ] && ok "baskasinin bildirimi silinemiyor" || bad "bildirim yetkisi" "$OTHERDEL"
+
 # ---------------------------------------------------------------- Gonderi silme
 step "12) Gonderi silme ve medya serbest birakma"
 DELP=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/posts/$PID_A")
