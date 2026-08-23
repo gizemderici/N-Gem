@@ -33,6 +33,10 @@ import com.nexi.recommendations.recommendationRoutes
 import com.nexi.profiles.JdbcProfileRepository
 import com.nexi.profiles.ProfileService
 import com.nexi.profiles.profileRoutes
+import com.nexi.stories.JdbcStoryRepository
+import com.nexi.stories.StoryJanitor
+import com.nexi.stories.StoryService
+import com.nexi.stories.storyRoutes
 import com.nexi.topics.JdbcTopicRepository
 import com.nexi.topics.TopicService
 import com.nexi.topics.topicRoutes
@@ -100,6 +104,8 @@ fun Application.module() {
     val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage)
     val profileRepository = JdbcProfileRepository(dataSource)
     val profileService = ProfileService(profileRepository, objectStorage)
+    val storyRepository = JdbcStoryRepository(dataSource)
+    val storyService = StoryService(storyRepository, objectStorage)
     val moderationService = ModerationService(
         repository = JdbcModerationRepository(dataSource),
         users = { username -> profileRepository.findIdByUsername(username) },
@@ -110,11 +116,14 @@ fun Application.module() {
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
 
     val janitor = MediaJanitor(mediaRepository, objectStorage)
+    val storyJanitor = StoryJanitor(storyRepository, objectStorage)
     val janitorJob = launch {
         val ttl = Duration.ofHours(config.abandonedUploadTtlHours)
         while (isActive) {
             runCatching { janitor.sweepAbandonedUploads(ttl) }
                 .onFailure { appLogger.warn("Abandoned upload sweep failed", it) }
+            runCatching { storyJanitor.sweepExpired() }
+                .onFailure { appLogger.warn("Expired story sweep failed", it) }
             delay(SWEEP_INTERVAL_MILLIS)
         }
     }
@@ -200,6 +209,7 @@ fun Application.module() {
         // literal olduğu için ondan önce eşleşir, çakışma yok.
         profileRoutes(profileService, postService)
         moderationRoutes(moderationService)
+        storyRoutes(storyService)
         topicRoutes(topicService)
         feedRoutes(feedService)
     }

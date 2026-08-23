@@ -325,6 +325,76 @@ BADID=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Ty
 RP=$(ca "$TOK_A" "$BASE/api/v1/recommendations/profile?localHour=14")
 printf '%s' "$RP" | grep -q '"eventCount"' && ok "oneri profili okundu" || bad "oneri profili" "$RP"
 
+# ------------------------------------------------------------- 11a) Hikayeler
+step "11a) Hikayeler"
+
+# A ve B karsilikli takiplessin ki hikaye akisinda gorunsunler.
+ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/follow" >/dev/null
+
+new_image() { # -> mediaId
+  local f=/tmp/e2e_story_$1.png
+  printf '\211PNG\r\n\032\n' > "$f"; head -c $((100 + $1)) /dev/urandom >> "$f"
+  local sz up mid url
+  sz=$(wc -c < "$f" | tr -d ' ')
+  up=$(ca "$2" -X POST "$BASE/api/v1/media/uploads" -H 'Content-Type: application/json' \
+    -d "{\"filename\":\"s$1.png\",\"mimeType\":\"image/png\",\"sizeBytes\":$sz}")
+  mid=$(printf '%s' "$up" | field mediaId); url=$(printf '%s' "$up" | field uploadUrl)
+  curl -s -o /dev/null -m 30 -X PUT "$url" -H "Content-Type: image/png" --data-binary "@$f"
+  ca "$2" -X POST "$BASE/api/v1/media/$mid/complete" >/dev/null
+  printf '%s' "$mid"
+}
+
+SM1=$(new_image 1 "$TOK_B")
+ST1=$(ca "$TOK_B" -X POST "$BASE/api/v1/stories" -H 'Content-Type: application/json' \
+  -d "{\"mediaId\":\"$SM1\",\"caption\":\"E2E hikaye\"}")
+SID1=$(printf '%s' "$ST1" | field id)
+[ -n "$SID1" ] && ok "hikaye olusturuldu" || bad "hikaye olusturma" "$ST1"
+printf '%s' "$ST1" | grep -q '"expiresAt"' && ok "sona erme zamani var" || bad "expiresAt" "$ST1"
+
+# Ayni medya ikinci kez kullanilamaz
+DUPST=$(ca "$TOK_B" -X POST "$BASE/api/v1/stories" -H 'Content-Type: application/json' -d "{\"mediaId\":\"$SM1\"}")
+[ "$(printf '%s' "$DUPST" | field code)" = "MEDIA_ALREADY_ATTACHED" ] && ok "ayni medya ikinci hikayede kullanilamadi" || bad "medya tekrari" "$DUPST"
+
+# A takip ettigi icin B'nin hikayesini akista gormeli
+SFEED=$(ca "$TOK_A" "$BASE/api/v1/stories/feed")
+printf '%s' "$SFEED" | grep -q "$SID1" && ok "takip edilenin hikayesi akista" || bad "hikaye akisi" "$SFEED"
+printf '%s' "$SFEED" | grep -q '"hasUnseen":true' && ok "gorulmemis isareti" || bad "hasUnseen" "$SFEED"
+
+# Sayac baskasina gorunmemeli
+printf '%s' "$SFEED" | grep -q '"viewCount"' && bad "sayac baskasina gorunmemeli" "$SFEED" || ok "sayac baskasina gizli"
+
+# Goruntuleme
+VIEW=$(ca "$TOK_A" -X PUT "$BASE/api/v1/stories/$SID1/view")
+[ "$(printf '%s' "$VIEW" | boolf seen)" = "true" ] && ok "hikaye goruntulendi" || bad "goruntuleme" "$VIEW"
+
+# Sahibi goruntuleyenleri gorebilmeli
+VIEWERS=$(ca "$TOK_B" "$BASE/api/v1/stories/$SID1/viewers")
+printf '%s' "$VIEWERS" | grep -q "$USER_A" && ok "sahibi goruntuleyenleri goruyor" || bad "goruntuleyen listesi" "$VIEWERS"
+
+# Baskasi goruntuleyenleri gorememeli
+NOVIEW=$(ca "$TOK_A" "$BASE/api/v1/stories/$SID1/viewers")
+[ "$(printf '%s' "$NOVIEW" | field code)" = "STORY_NOT_FOUND" ] && ok "goruntuleyen listesi yalnizca sahibine" || bad "goruntuleyen yetkisi" "$NOVIEW"
+
+# Profil uzerinden hikayeler
+UST=$(ca "$TOK_A" "$BASE/api/v1/users/$USER_B/stories")
+printf '%s' "$UST" | grep -q "$SID1" && ok "profil hikayeleri listelendi" || bad "profil hikayeleri" "$UST"
+
+# Silme yalnizca sahibine
+NODEL=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/stories/$SID1")
+[ "$(printf '%s' "$NODEL" | field code)" = "STORY_NOT_FOUND" ] && ok "baskasinin hikayesi silinemiyor" || bad "silme yetkisi" "$NODEL"
+DELST=$(ca "$TOK_B" -X DELETE "$BASE/api/v1/stories/$SID1")
+printf '%s' "$DELST" | grep -q "silindi" && ok "sahibi hikayeyi sildi" || bad "hikaye silme" "$DELST"
+GONEST=$(ca "$TOK_A" "$BASE/api/v1/stories/feed")
+printf '%s' "$GONEST" | grep -q "$SID1" && bad "silinen hikaye akista" "$GONEST" || ok "silinen hikaye akistan dustu"
+
+# Engelleme hikayeleri de gizlemeli
+SM2=$(new_image 2 "$TOK_B")
+ca "$TOK_B" -X POST "$BASE/api/v1/stories" -H 'Content-Type: application/json' -d "{\"mediaId\":\"$SM2\"}" >/dev/null
+ca "$TOK_A" -X PUT "$BASE/api/v1/users/$USER_B/block" >/dev/null
+BLKST=$(ca "$TOK_A" "$BASE/api/v1/stories/feed")
+printf '%s' "$BLKST" | grep -q "$USER_B" && bad "engellenenin hikayesi gorunuyor" "$BLKST" || ok "engellenenin hikayesi gizlendi"
+ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/block" >/dev/null
+
 # ------------------------------------------------------- 11b) Engelleme ve sikayet
 step "11b) Engelleme ve sikayet"
 

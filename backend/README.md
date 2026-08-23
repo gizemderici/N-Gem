@@ -54,10 +54,10 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 86 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 100 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
-takip, takip içeriğinin akışa girmesi, avatar/biyografi, engelleme/şikâyet ve öneri olayları.
+takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, engelleme/şikâyet ve öneri olayları.
 
 ```bash
 docker compose up -d --build
@@ -450,6 +450,52 @@ takipçi ve takip listeleri. Bildirim ve mesaj cevapları henüz yok (Faz 11–1
 
 Depolama anahtarı hiçbir zaman dışarı çıkmaz; imzalı adres servis katmanında
 üretilir (`AvatarUrls`).
+
+## Hikâyeler
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/api/v1/stories` | `{ "mediaId", "caption"? }` |
+| `GET` | `/api/v1/stories/feed` | Takip ettiklerin + kendin, yazara göre gruplu |
+| `GET` | `/api/v1/users/{username}/stories` | Bir kullanıcının aktif hikâyeleri |
+| `PUT` | `/api/v1/stories/{id}/view` | Görüntülemeyi kaydeder; tekrar çağrılması güvenlidir |
+| `GET` | `/api/v1/stories/{id}/viewers` | **Yalnızca sahibi**, imleçli |
+| `DELETE` | `/api/v1/stories/{id}` | Yalnızca sahibi siler |
+
+Hikâye **24 saat** sonra sona erer (`StoryService.LIFETIME`). Süresi dolan
+hikâye bütün sorgulardan düşer; ayrıca saatlik `StoryJanitor` onu kapatıp
+medyasını depodan siler — aksi halde her hikâye kalıcı olarak birikirdi.
+
+Akış yazara göre gruplu döner, çünkü arayüz kişi başına tek balon gösteriyor:
+
+```json
+{
+  "items": [
+    {
+      "author": { "id": "…", "username": "…", "avatarUrl": "…" },
+      "stories": [ { "id": "…", "media": { "url": "…" }, "seenByMe": false } ],
+      "hasUnseen": true,
+      "latestPublishedAt": "2026-08-23T10:15:30Z"
+    }
+  ]
+}
+```
+
+Görülmemiş hikâyesi olan gruplar başa gelir. Şerit sayfalanmaz: içerik 24 saatte
+yok oluyor ve takip grafiği sınırlı; yine de sorgunun büyümemesi için tavan var.
+
+**Görünürlük kuralları**
+
+- Görüntüleyen listesini yalnızca hikâyenin sahibi görebilir; başkasına `403`
+  değil `STORY_NOT_FOUND` döner, aksi halde hikâyenin varlığı doğrulanmış olurdu.
+- `viewCount` yalnızca sahibine gönderilir, başkasında hiç bulunmaz.
+- Kendi hikâyene bakmak görüntüleme sayılmaz.
+- Engellenen kullanıcıların hikâyeleri ne akışta ne profilinde görünür.
+
+**Medya.** Görsel veya video olabilir; medyanın hazır (`status` ve
+`processing_status` ikisi de `READY`) ve kullanıcıya ait olması gerekir. Bir
+medya yalnızca tek bir yerde kullanılabilir: gönderide kullanılan hikâyeye,
+hikâyede kullanılan başka bir hikâyeye eklenemez (`MEDIA_ALREADY_ATTACHED`).
 
 ## Engelleme ve şikâyet
 
