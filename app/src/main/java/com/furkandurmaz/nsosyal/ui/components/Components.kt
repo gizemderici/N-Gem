@@ -134,6 +134,19 @@ fun Avatar(
     size: Dp = 44.dp,
     showVerified: Boolean = creator.verified
 ) {
+    var remoteImage by remember(creator.avatarUrl) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(creator.avatarUrl) {
+        val url = creator.avatarUrl ?: return@LaunchedEffect
+        remoteImage = withContext(Dispatchers.IO) {
+            runCatching {
+                (URL(url).openConnection() as HttpURLConnection).run {
+                    connectTimeout = 5_000
+                    readTimeout = 8_000
+                    try { inputStream.use { BitmapFactory.decodeStream(it)?.asImageBitmap() } } finally { disconnect() }
+                }
+            }.getOrNull()
+        }
+    }
     Box(modifier = Modifier.size(size)) {
         Box(
             modifier = Modifier
@@ -144,12 +157,21 @@ fun Avatar(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                creator.initials,
-                color = Color.White,
-                fontSize = (size.value * 0.31f).sp,
-                fontWeight = FontWeight.Bold
-            )
+            if (remoteImage != null) {
+                Image(
+                    bitmap = remoteImage!!,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                )
+            } else {
+                Text(
+                    creator.initials,
+                    color = Color.White,
+                    fontSize = (size.value * 0.31f).sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         if (showVerified) {
             Box(

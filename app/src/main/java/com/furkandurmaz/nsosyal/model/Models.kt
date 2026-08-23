@@ -23,7 +23,8 @@ data class Creator(
     val handle: String,
     val initials: String,
     val colors: List<Color>,
-    val verified: Boolean = false
+    val verified: Boolean = false,
+    val avatarUrl: String? = null
 )
 
 enum class ArtworkStyle(val glyph: String) {
@@ -63,7 +64,9 @@ data class SocialStory(
     val detail: String,
     val time: String,
     val seen: Boolean,
-    val own: Boolean
+    val own: Boolean,
+    val mediaUrl: String? = null,
+    val mediaMimeType: String? = null
 )
 
 enum class NotificationKind(val glyph: String, val color: Color) {
@@ -79,5 +82,7 @@ data class SocialNotification(
     val message: String,
     val time: String,
     val kind: NotificationKind,
-    val unread: Boolean
+    val unread: Boolean,
+    val targetType: String? = null,
+    val targetId: String? = null
 )

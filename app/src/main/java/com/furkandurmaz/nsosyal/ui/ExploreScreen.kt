@@ -21,6 +21,7 @@ import com.furkandurmaz.nsosyal.AppState
 import com.furkandurmaz.nsosyal.model.SocialPost
 import com.furkandurmaz.nsosyal.ui.components.*
 import com.furkandurmaz.nsosyal.ui.theme.*
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,10 +29,14 @@ fun ExploreScreen(state: AppState) {
     var query by remember { mutableStateOf("") }
     var selectedTopic by remember { mutableStateOf("Tümü") }
     var showFilters by remember { mutableStateOf(false) }
-    val topics = listOf("Tümü", "Teknoloji", "Tasarım", "Yerel", "Mizah", "Eğitim")
-    val filtered = state.posts.filter {
-        (selectedTopic == "Tümü" || it.topic == selectedTopic) &&
-            (query.isBlank() || it.body.contains(query, true) || it.creator.name.contains(query, true) || it.topic.contains(query, true))
+    val topics = listOf("Tümü") + state.topics.map { it.name }
+    val source = if (query.trim().length >= 2) state.searchPosts else state.explorePosts
+    val filtered = source.filter { selectedTopic == "Tümü" || it.topic == selectedTopic }
+
+    LaunchedEffect(Unit) { state.loadExplore() }
+    LaunchedEffect(query) {
+        delay(300)
+        state.search(query)
     }
 
     LazyColumn(
@@ -56,6 +61,23 @@ fun ExploreScreen(state: AppState) {
                 Pressable(onClick = { showFilters = true }, modifier = Modifier.size(52.dp).background(if (selectedTopic == "Tümü") Color.White else Ink, CircleShape).border(1.dp, Border, CircleShape)) {
                     Text("☷", color = if (selectedTopic == "Tümü") Ink else Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
                     if (selectedTopic != "Tümü") Box(Modifier.size(10.dp).align(Alignment.TopEnd).background(Coral, CircleShape).border(2.dp, Color.White, CircleShape))
+                }
+            }
+        }
+        if (query.isNotBlank() && state.searchUsers.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("Kişiler", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        state.searchUsers.forEach { user ->
+                            SurfaceCard(Modifier.width(190.dp)) {
+                                Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    Box(Modifier.size(38.dp).background(BrandBrush, CircleShape), contentAlignment = Alignment.Center) { Text(user.fullName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold) }
+                                    Column { Text(user.fullName, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1); Text("@${user.username}", color = MutedInk, fontSize = 10.sp) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -158,7 +180,9 @@ private fun CommunityCard(title: String, detail: String, glyph: String, color: C
 @Composable
 private fun ExploreTile(post: SocialPost, state: AppState, modifier: Modifier) {
     Pressable(onClick = { state.openReason(post) }, modifier = modifier) {
-        if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) {
+        if (post.mediaUrl != null && post.mediaMimeType != null) {
+            RemotePostMedia(post.mediaUrl, post.mediaMimeType)
+        } else if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) {
             MediaArtwork(post.artwork, post.artworkTitle, post.artworkSubtitle, compact = true, isVideo = post.isVideo, videoLength = post.videoLength)
         } else {
             Box(Modifier.fillMaxWidth().aspectRatio(1f).background(androidx.compose.ui.graphics.Brush.linearGradient(post.creator.colors), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {

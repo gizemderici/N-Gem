@@ -28,17 +28,20 @@ import com.furkandurmaz.nsosyal.ui.theme.*
 fun ProfileScreen(state: AppState, onLogout: () -> Unit) {
     var selectedSection by remember { mutableStateOf("Gönderiler") }
     var showSettings by remember { mutableStateOf(false) }
+    var showEdit by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { state.refreshProfile(); state.loadTopics() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(Canvas),
         contentPadding = PaddingValues(bottom = 118.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { ProfileHero(state) { showSettings = true } }
+        item { ProfileHero(state, { showSettings = true }) { showEdit = true } }
         item { PrivacyCard(Modifier.padding(horizontal = 18.dp)) { showSettings = true } }
-        item { StatsRow() }
+        item { StatsRow(state) }
         item { ProfileSectionPicker(selectedSection) { selectedSection = it } }
-        val posts = if (selectedSection == "Kaydedilenler") state.posts.filter { it.id in state.savedPostIds } else state.posts
+        val posts = if (selectedSection == "Kaydedilenler") state.posts.filter { it.id in state.savedPostIds } else state.profilePosts
         if (posts.isEmpty()) {
             item { SurfaceCard(Modifier.padding(horizontal = 18.dp).fillMaxWidth()) { Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("▯", color = Blue, fontSize = 28.sp); Text("Henüz kayıt yok", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold); Text("Kaydettiğin içerikler burada görünecek.", color = MutedInk, fontSize = 13.sp) } } }
         } else {
@@ -58,10 +61,11 @@ fun ProfileScreen(state: AppState, onLogout: () -> Unit) {
             SettingsContent(state, onLogout) { showSettings = false }
         }
     }
+    if (showEdit) EditProfileDialog(state) { showEdit = false }
 }
 
 @Composable
-private fun ProfileHero(state: AppState, onSettings: () -> Unit) {
+private fun ProfileHero(state: AppState, onSettings: () -> Unit, onEdit: () -> Unit) {
     Box(Modifier.fillMaxWidth().height(445.dp).statusBarsPadding()) {
         Box(Modifier.fillMaxWidth().height(165.dp).background(Brush.linearGradient(listOf(Color(0xFF0A1429), Blue, Violet))))
         Row(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -73,11 +77,11 @@ private fun ProfileHero(state: AppState, onSettings: () -> Unit) {
             Text(state.displayName, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Text(state.displayUsername, color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(4.dp))
-            Text("Dijital ürünler, sade deneyimler ve Türkiye’den çıkan iyi fikirler üzerine düşünüyorum.", color = Ink, fontSize = 13.sp, lineHeight = 18.sp, textAlign = TextAlign.Center)
-            Text("⌖ İstanbul     ◷ Ağu 2026", color = MutedInk, fontSize = 10.sp)
+            Text(state.profile?.bio?.takeIf(String::isNotBlank) ?: "Henüz biyografi eklenmedi.", color = Ink, fontSize = 13.sp, lineHeight = 18.sp, textAlign = TextAlign.Center)
+            Text("N Sosyal üyesi", color = MutedInk, fontSize = 10.sp)
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                Pressable(onClick = { state.showToast("Profil düzenleme yakında") }, modifier = Modifier.weight(1f).height(42.dp).background(Color.White, CircleShape).border(1.dp, StrongBorder, CircleShape)) { Text("Profili düzenle", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center)) }
+                Pressable(onClick = onEdit, modifier = Modifier.weight(1f).height(42.dp).background(Color.White, CircleShape).border(1.dp, StrongBorder, CircleShape)) { Text("Profili düzenle", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center)) }
                 Pressable(onClick = { state.showToast("Başlangıç paketin hazır") }, modifier = Modifier.size(48.dp, 42.dp).background(Ink, CircleShape)) { Text("+♙", color = Color.White, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center)) }
             }
         }
@@ -98,10 +102,10 @@ private fun PrivacyCard(modifier: Modifier, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatsRow() {
+private fun StatsRow(state: AppState) {
     SurfaceCard(Modifier.padding(horizontal = 18.dp).fillMaxWidth()) {
         Row(Modifier.padding(vertical = 14.dp)) {
-            ProfileStat("42", "Gönderi", Modifier.weight(1f)); Box(Modifier.width(1.dp).height(30.dp).background(Border)); ProfileStat("12,8 B", "Takipçi", Modifier.weight(1f)); Box(Modifier.width(1.dp).height(30.dp).background(Border)); ProfileStat("684", "Takip", Modifier.weight(1f))
+            ProfileStat("${state.profile?.postCount ?: state.profilePosts.size}", "Gönderi", Modifier.weight(1f)); Box(Modifier.width(1.dp).height(30.dp).background(Border)); ProfileStat(compactProfileNumber(state.profile?.followerCount ?: 0), "Takipçi", Modifier.weight(1f)); Box(Modifier.width(1.dp).height(30.dp).background(Border)); ProfileStat(compactProfileNumber(state.profile?.followingCount ?: 0), "Takip", Modifier.weight(1f))
         }
     }
 }
@@ -123,7 +127,8 @@ private fun ProfileSectionPicker(selected: String, onSelected: (String) -> Unit)
 @Composable
 private fun ProfileTile(post: SocialPost, state: AppState, modifier: Modifier) {
     Pressable(onClick = { state.openReason(post) }, modifier = modifier) {
-        if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) MediaArtwork(post.artwork, post.artworkTitle, post.artworkSubtitle, compact = true, isVideo = post.isVideo, videoLength = post.videoLength)
+        if (post.mediaUrl != null && post.mediaMimeType != null) RemotePostMedia(post.mediaUrl, post.mediaMimeType)
+        else if (post.artwork != null && post.artworkTitle != null && post.artworkSubtitle != null) MediaArtwork(post.artwork, post.artworkTitle, post.artworkSubtitle, compact = true, isVideo = post.isVideo, videoLength = post.videoLength)
         else Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Brush.linearGradient(post.creator.colors), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) { Text("“", color = Color.White.copy(alpha = .85f), fontSize = 32.sp, fontWeight = FontWeight.Bold) }
     }
 }
@@ -233,7 +238,7 @@ private fun SettingsContent(state: AppState, onLogout: () -> Unit, onDismiss: ()
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showInterestPicker = false }) {
+                TextButton(onClick = { state.completeOnboarding(state.selectedInterestIds.toList()); showInterestPicker = false }) {
                     Text("Bitti", color = Blue, fontWeight = FontWeight.Bold)
                 }
             },
@@ -241,6 +246,27 @@ private fun SettingsContent(state: AppState, onLogout: () -> Unit, onDismiss: ()
         )
     }
 }
+
+@Composable
+private fun EditProfileDialog(state: AppState, onDismiss: () -> Unit) {
+    var fullName by remember { mutableStateOf(state.profile?.fullName ?: state.displayName) }
+    var bio by remember { mutableStateOf(state.profile?.bio.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Profili düzenle", color = Ink, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(fullName, { fullName = it.take(80) }, label = { Text("Ad soyad") }, singleLine = true)
+                OutlinedTextField(bio, { bio = it.take(280) }, label = { Text("Biyografi") }, minLines = 3)
+            }
+        },
+        confirmButton = { TextButton(onClick = { state.updateProfile(fullName, bio, onDismiss) }, enabled = fullName.trim().length >= 2) { Text("Kaydet", color = Blue, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç", color = MutedInk) } },
+        containerColor = Color.White
+    )
+}
+
+private fun compactProfileNumber(value: Int): String = if (value >= 1_000) "${value / 1000.0} B" else value.toString()
 
 @Composable
 private fun SettingsSection(title: String, content: @Composable () -> Unit) {

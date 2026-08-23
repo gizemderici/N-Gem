@@ -27,6 +27,9 @@ fun CreateScreen(state: AppState) {
     var selectedFormat by remember { mutableStateOf(formats.first().first) }
     var text by remember { mutableStateOf("") }
     var audience by remember { mutableStateOf("Herkes") }
+    val selectedTopicIds = remember { mutableStateListOf<String>() }
+
+    LaunchedEffect(Unit) { state.loadTopics() }
 
     Column(
         modifier = Modifier.fillMaxSize().background(Canvas).statusBarsPadding().padding(top = 8.dp)
@@ -69,6 +72,25 @@ fun CreateScreen(state: AppState) {
                     }
                 }
             }
+            if (state.topics.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row { Text("Konu ekle", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f)); Text("${selectedTopicIds.size}/3", color = MutedInk, fontSize = 11.sp) }
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.topics.forEach { topic ->
+                            val selected = topic.id in selectedTopicIds
+                            Pressable(
+                                onClick = {
+                                    if (selected) selectedTopicIds.remove(topic.id)
+                                    else if (selectedTopicIds.size < 3) selectedTopicIds.add(topic.id)
+                                },
+                                modifier = Modifier.height(36.dp).background(if (selected) Blue else Color.White, CircleShape).border(1.dp, if (selected) Color.Transparent else Border, CircleShape).padding(horizontal = 12.dp)
+                            ) {
+                                Text("${topic.icon}  ${topic.name}", color = if (selected) Color.White else Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
+                            }
+                        }
+                    }
+                }
+            }
             if (selectedFormat != "Gönderi") {
                 Pressable(onClick = { state.showToast("Medya seçici yakında") }) {
                     Box(Modifier.fillMaxWidth().height(128.dp).background(Blue.copy(alpha = .06f), RoundedCornerShape(22.dp)).border(1.dp, Blue.copy(alpha = .18f), RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
@@ -85,7 +107,7 @@ fun CreateScreen(state: AppState) {
             }
             Spacer(Modifier.weight(1f))
         }
-        PrimaryButton("Yayınla", { state.publish(text) }, Modifier.padding(horizontal = 18.dp, vertical = 12.dp), text.isNotBlank())
+        PrimaryButton("Yayınla", { state.publish(text, selectedTopicIds.toList()); text = ""; selectedTopicIds.clear() }, Modifier.padding(horizontal = 18.dp, vertical = 12.dp), text.isNotBlank())
         Spacer(Modifier.navigationBarsPadding().height(86.dp))
     }
 }

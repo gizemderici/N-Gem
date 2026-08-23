@@ -14,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.furkandurmaz.nsosyal.AppState
-import com.furkandurmaz.nsosyal.data.MockSocialData
 import com.furkandurmaz.nsosyal.model.SocialNotification
 import com.furkandurmaz.nsosyal.ui.components.*
 import com.furkandurmaz.nsosyal.ui.theme.*
@@ -22,7 +21,8 @@ import com.furkandurmaz.nsosyal.ui.theme.*
 @Composable
 fun NotificationsScreen(state: AppState) {
     var showOnlyUnread by remember { mutableStateOf(false) }
-    val notifications = MockSocialData.notifications.filter { !showOnlyUnread || it.unread }
+    val notifications = state.notifications.filter { !showOnlyUnread || it.unread }
+    LaunchedEffect(Unit) { state.loadNotifications() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(Canvas),
@@ -35,6 +35,8 @@ fun NotificationsScreen(state: AppState) {
                 Pressable(onClick = { showOnlyUnread = !showOnlyUnread }, modifier = Modifier.background(if (showOnlyUnread) Ink else ElevatedSurface, CircleShape).padding(horizontal = 13.dp, vertical = 9.dp)) {
                     Text(if (showOnlyUnread) "Tümü" else "Okunmamış", color = if (showOnlyUnread) androidx.compose.ui.graphics.Color.White else Ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
+                Spacer(Modifier.width(7.dp))
+                RoundIconButton("✓", "Tümünü okundu işaretle", state::markAllNotificationsRead)
             }
             Spacer(Modifier.height(18.dp))
         }

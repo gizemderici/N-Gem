@@ -9,11 +9,23 @@ import com.furkandurmaz.nsosyal.data.MockSocialData
 import com.furkandurmaz.nsosyal.model.ArtworkStyle
 import com.furkandurmaz.nsosyal.model.Creator
 import com.furkandurmaz.nsosyal.model.MainTab
+import com.furkandurmaz.nsosyal.model.NotificationKind
+import com.furkandurmaz.nsosyal.model.SocialNotification
 import com.furkandurmaz.nsosyal.model.SocialPost
+import com.furkandurmaz.nsosyal.model.SocialStory
 import com.furkandurmaz.nsosyal.network.BackendApiClient
 import com.furkandurmaz.nsosyal.network.BackendApiException
 import com.furkandurmaz.nsosyal.network.BackendAuthentication
+import com.furkandurmaz.nsosyal.network.BackendAuthor
+import com.furkandurmaz.nsosyal.network.BackendComment
+import com.furkandurmaz.nsosyal.network.BackendConversation
+import com.furkandurmaz.nsosyal.network.BackendMessage
+import com.furkandurmaz.nsosyal.network.BackendNotification
 import com.furkandurmaz.nsosyal.network.BackendPost
+import com.furkandurmaz.nsosyal.network.BackendProfile
+import com.furkandurmaz.nsosyal.network.BackendSearchUser
+import com.furkandurmaz.nsosyal.network.BackendStory
+import com.furkandurmaz.nsosyal.network.BackendTopic
 import com.furkandurmaz.nsosyal.network.BackendUser
 import com.furkandurmaz.nsosyal.network.SessionStore
 import com.furkandurmaz.nsosyal.ui.theme.Blue
@@ -46,6 +58,30 @@ class AppState(
         private set
     var posts by mutableStateOf(MockSocialData.posts)
         private set
+    var explorePosts by mutableStateOf(MockSocialData.posts)
+        private set
+    var searchPosts by mutableStateOf(emptyList<SocialPost>())
+        private set
+    var searchUsers by mutableStateOf(emptyList<BackendSearchUser>())
+        private set
+    var topics by mutableStateOf(emptyList<BackendTopic>())
+        private set
+    var stories by mutableStateOf(MockSocialData.stories)
+        private set
+    var notifications by mutableStateOf(MockSocialData.notifications)
+        private set
+    var unreadNotificationCount by mutableStateOf(0)
+        private set
+    var commentsByPost by mutableStateOf<Map<String, List<BackendComment>>>(emptyMap())
+        private set
+    var profile by mutableStateOf<BackendProfile?>(null)
+        private set
+    var profilePosts by mutableStateOf(emptyList<SocialPost>())
+        private set
+    var conversations by mutableStateOf(emptyList<BackendConversation>())
+        private set
+    var messagesByConversation by mutableStateOf<Map<String, List<BackendMessage>>>(emptyMap())
+        private set
 
     val selectedInterestIds = mutableStateListOf("technology", "design", "education")
     val likedPostIds = mutableStateListOf<String>()
@@ -69,7 +105,8 @@ class AppState(
             handle = displayUsername,
             initials = initials(displayName),
             colors = listOf(Cyan, Blue, Violet),
-            verified = currentUser?.emailVerified ?: true
+            verified = currentUser?.emailVerified ?: true,
+            avatarUrl = profile?.avatarUrl
         )
 
     val visiblePosts: List<SocialPost>
@@ -95,6 +132,7 @@ class AppState(
         return try {
             currentUser = apiClient.currentUser(accessToken)
             loadBackendFeed(accessToken)
+            loadBackendFeatures(accessToken)
             recordRecommendationEvent(eventType = "session_started", surface = "app")
             true
         } catch (error: BackendApiException) {
@@ -167,6 +205,15 @@ class AppState(
         sessionStore?.clear()
         currentUser = null
         posts = MockSocialData.posts
+        explorePosts = MockSocialData.posts
+        stories = MockSocialData.stories
+        notifications = MockSocialData.notifications
+        topics = emptyList()
+        commentsByPost = emptyMap()
+        profile = null
+        profilePosts = emptyList()
+        conversations = emptyList()
+        messagesByConversation = emptyMap()
         likedPostIds.clear()
         savedPostIds.clear()
         if (dataSourceMode == DataSourceMode.MOCK) savedPostIds.add("long-learning")
@@ -203,6 +250,22 @@ class AppState(
                 surface = "onboarding"
             )
         }
+        if (dataSourceMode == DataSourceMode.BACKEND) {
+            val token = sessionStore?.accessToken ?: return
+            scope.launch {
+                runCatching {
+                    if (topics.isEmpty()) topics = apiClientOrThrow().topics()
+                    val ids = interests.mapNotNull { selected ->
+                        topics.firstOrNull { it.id == selected || it.slug == selected }?.id
+                    }
+                    if (ids.isNotEmpty()) {
+                        val selected = apiClientOrThrow().updateUserTopics(ids, token)
+                        selectedInterestIds.clear()
+                        selectedInterestIds.addAll(selected.map(BackendTopic::slug))
+                    }
+                }
+            }
+        }
     }
 
     fun toggleLike(post: SocialPost) {
@@ -236,13 +299,19 @@ class AppState(
         }
     }
 
-    fun toggleFollow(creatorId: String, creatorName: String) {
-        if (creatorId in followedCreatorIds) {
-            followedCreatorIds.remove(creatorId)
+    fun toggleFollow(creator: Creator) {
+        val active = creator.id !in followedCreatorIds
+        if (!active) {
+            followedCreatorIds.remove(creator.id)
         } else {
-            followedCreatorIds.add(creatorId)
-            showToast("$creatorName takip edildi")
+            followedCreatorIds.add(creator.id)
+            showToast("${creator.name} takip edildi")
         }
+        runRemoteInteraction(
+            onFailure = {
+                if (active) followedCreatorIds.remove(creator.id) else if (creator.id !in followedCreatorIds) followedCreatorIds.add(creator.id)
+            }
+        ) { api, token -> api.setFollow(creator.handle.removePrefix("@"), active, token) }
     }
 
     fun hide(post: SocialPost) {
@@ -264,7 +333,16 @@ class AppState(
     fun report(post: SocialPost) {
         recordRecommendationEvent("content_reported", post)
         if (post.id !in hiddenPostIds) hiddenPostIds.add(post.id)
-        showToast("Bildirimin alındı")
+        if (dataSourceMode != DataSourceMode.BACKEND) return showToast("Bildirimin alındı")
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            try {
+                val alreadyReported = apiClientOrThrow().reportPost(post.id, token)
+                showToast(if (alreadyReported) "Bu gönderiyi daha önce bildirmiştin" else "Bildirimin alındı")
+            } catch (error: Exception) {
+                showToast(error.userMessage("Bildirim gönderilemedi."))
+            }
+        }
     }
 
     fun avoidAtCurrentTime(post: SocialPost) {
@@ -290,7 +368,7 @@ class AppState(
         toastMessage = message
     }
 
-    fun publish(text: String) {
+    fun publish(text: String, topicIds: List<String> = emptyList()) {
         if (text.isBlank()) return
         if (dataSourceMode != DataSourceMode.BACKEND) {
             posts = listOf(localPost(text)) + posts
@@ -301,13 +379,190 @@ class AppState(
         val token = sessionStore?.accessToken ?: return showToast("Yayınlamak için yeniden giriş yapmalısın.")
         scope.launch {
             try {
-                val created = apiClientOrThrow().createPost(text.trim(), token).toSocialPost()
+                val created = apiClientOrThrow().createPost(text.trim(), topicIds, token).toSocialPost()
                 posts = listOf(created) + posts.filterNot { it.id == created.id }
                 finishPublishing()
             } catch (error: Exception) {
                 showToast(error.userMessage("Gönderi yayınlanamadı."))
             }
         }
+    }
+
+    fun loadTopics() {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching {
+                topics = apiClientOrThrow().topics()
+                val selected = apiClientOrThrow().userTopics(token)
+                if (selected.isNotEmpty()) {
+                    selectedInterestIds.clear()
+                    selectedInterestIds.addAll(selected.map(BackendTopic::slug))
+                }
+            }.onFailure { showToast("İlgi alanları alınamadı") }
+        }
+    }
+
+    fun loadComments(post: SocialPost) {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching { apiClientOrThrow().comments(post.id, token) }
+                .onSuccess { commentsByPost = commentsByPost + (post.id to it) }
+                .onFailure { showToast(it.userMessage("Yorumlar alınamadı.")) }
+        }
+    }
+
+    fun addComment(post: SocialPost, text: String, onSuccess: () -> Unit = {}) {
+        val clean = text.trim()
+        if (clean.isEmpty() || dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            try {
+                val comment = apiClientOrThrow().createComment(post.id, clean, token)
+                commentsByPost = commentsByPost + (post.id to (commentsByPost[post.id].orEmpty() + comment))
+                changeCommentCount(post.id, 1)
+                onSuccess()
+            } catch (error: Exception) {
+                showToast(error.userMessage("Yorum gönderilemedi."))
+            }
+        }
+    }
+
+    fun deleteComment(comment: BackendComment) {
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            try {
+                apiClientOrThrow().deleteComment(comment.id, token)
+                commentsByPost = commentsByPost + (comment.postId to commentsByPost[comment.postId].orEmpty().filterNot { it.id == comment.id })
+                changeCommentCount(comment.postId, -1)
+            } catch (error: Exception) {
+                showToast(error.userMessage("Yorum silinemedi."))
+            }
+        }
+    }
+
+    fun loadExplore() {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching { apiClientOrThrow().explore(token).map { it.toSocialPost() } }
+                .onSuccess { explorePosts = it }
+                .onFailure { showToast("Keşfet akışı yenilenemedi") }
+        }
+    }
+
+    fun search(query: String) {
+        val clean = query.trim()
+        if (clean.length < 2 || dataSourceMode != DataSourceMode.BACKEND) {
+            searchPosts = emptyList()
+            searchUsers = emptyList()
+            return
+        }
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching { apiClientOrThrow().search(clean, token) }
+                .onSuccess {
+                    searchUsers = it.users
+                    searchPosts = it.posts.map { post -> post.toSocialPost() }
+                }
+                .onFailure { showToast("Arama tamamlanamadı") }
+        }
+    }
+
+    fun loadNotifications() {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching { apiClientOrThrow().notifications(token) }
+                .onSuccess { (items, unread) ->
+                    notifications = items.map { it.toSocialNotification() }
+                    unreadNotificationCount = unread
+                }
+                .onFailure { showToast("Bildirimler yenilenemedi") }
+        }
+    }
+
+    fun markAllNotificationsRead() {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching { apiClientOrThrow().markAllNotificationsRead(token) }
+                .onSuccess {
+                    unreadNotificationCount = it
+                    notifications = notifications.map { notification -> notification.copy(unread = false) }
+                }
+                .onFailure { showToast("Bildirimler güncellenemedi") }
+        }
+    }
+
+    fun refreshProfile() {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        val username = currentUser?.username ?: return
+        scope.launch {
+            runCatching {
+                profile = apiClientOrThrow().profile(username, token)
+                profilePosts = apiClientOrThrow().userPosts(username, token).map { it.toSocialPost() }
+            }.onFailure { showToast("Profil güncellenemedi") }
+        }
+    }
+
+    fun updateProfile(fullName: String, bio: String, onSuccess: () -> Unit = {}) {
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            try {
+                profile = apiClientOrThrow().updateProfile(fullName.trim(), bio.trim(), token)
+                showToast("Profil güncellendi")
+                onSuccess()
+            } catch (error: Exception) {
+                showToast(error.userMessage("Profil kaydedilemedi."))
+            }
+        }
+    }
+
+    fun loadConversations() {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching { apiClientOrThrow().conversations(token) }
+                .onSuccess { conversations = it }
+                .onFailure { showToast("Mesajlar yenilenemedi") }
+        }
+    }
+
+    fun loadMessages(conversationId: String) {
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            runCatching {
+                val messages = apiClientOrThrow().messages(conversationId, token)
+                apiClientOrThrow().markConversationRead(conversationId, token)
+                messages
+            }.onSuccess { messagesByConversation = messagesByConversation + (conversationId to it) }
+                .onFailure { showToast("Mesajlar alınamadı") }
+        }
+    }
+
+    fun sendMessage(conversationId: String, text: String, onSuccess: () -> Unit = {}) {
+        val clean = text.trim()
+        if (clean.isEmpty()) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch {
+            try {
+                val message = apiClientOrThrow().sendMessage(conversationId, clean, token)
+                messagesByConversation = messagesByConversation + (conversationId to (messagesByConversation[conversationId].orEmpty() + message))
+                loadConversations()
+                onSuccess()
+            } catch (error: Exception) {
+                showToast(error.userMessage("Mesaj gönderilemedi."))
+            }
+        }
+    }
+
+    fun markStoryViewed(story: SocialStory) {
+        if (dataSourceMode != DataSourceMode.BACKEND) return
+        val token = sessionStore?.accessToken ?: return
+        scope.launch { runCatching { apiClientOrThrow().markStoryViewed(story.id, token) } }
     }
 
     fun resetLearnedProfile() {
@@ -341,6 +596,7 @@ class AppState(
         currentUser = authentication.user
         try {
             loadBackendFeed(authentication.tokens.accessToken)
+            loadBackendFeatures(authentication.tokens.accessToken)
             recordRecommendationEvent(eventType = "session_started", surface = "app")
         } catch (_: Exception) {
             posts = emptyList()
@@ -355,6 +611,7 @@ class AppState(
             sessionStore?.save(tokens)
             currentUser = apiClientOrThrow().currentUser(tokens.accessToken)
             loadBackendFeed(tokens.accessToken)
+            loadBackendFeatures(tokens.accessToken)
             true
         } catch (_: Exception) {
             sessionStore.clear()
@@ -372,12 +629,47 @@ class AppState(
         likedPostIds.addAll(backendPosts.filter(BackendPost::likedByMe).map(BackendPost::id))
         savedPostIds.clear()
         savedPostIds.addAll(backendPosts.filter(BackendPost::savedByMe).map(BackendPost::id))
+        followedCreatorIds.clear()
+        followedCreatorIds.addAll(backendPosts.filter(BackendPost::authorFollowedByMe).map(BackendPost::authorId).distinct())
+    }
+
+    private suspend fun loadBackendFeatures(accessToken: String) {
+        runCatching {
+            topics = apiClientOrThrow().topics()
+            val selected = apiClientOrThrow().userTopics(accessToken)
+            if (selected.isNotEmpty()) {
+                selectedInterestIds.clear()
+                selectedInterestIds.addAll(selected.map(BackendTopic::slug))
+            }
+        }
+        runCatching {
+            stories = apiClientOrThrow().storyFeed(accessToken).map { it.toSocialStory() }
+        }
+        runCatching {
+            val (items, unread) = apiClientOrThrow().notifications(accessToken)
+            notifications = items.map { it.toSocialNotification() }
+            unreadNotificationCount = unread
+        }
+        runCatching {
+            explorePosts = apiClientOrThrow().explore(accessToken).map { it.toSocialPost() }
+        }
+        currentUser?.username?.let { username ->
+            runCatching {
+                profile = apiClientOrThrow().profile(username, accessToken)
+                profilePosts = apiClientOrThrow().userPosts(username, accessToken).map { it.toSocialPost() }
+            }
+        }
+        runCatching { conversations = apiClientOrThrow().conversations(accessToken) }
     }
 
     private fun useMockData() {
         dataSourceMode = DataSourceMode.MOCK
         currentUser = null
         posts = MockSocialData.posts
+        explorePosts = MockSocialData.posts
+        stories = MockSocialData.stories
+        notifications = MockSocialData.notifications
+        unreadNotificationCount = notifications.count(SocialNotification::unread)
         likedPostIds.clear()
         savedPostIds.clear()
         savedPostIds.add("long-learning")
@@ -455,11 +747,12 @@ class AppState(
                 handle = handle,
                 initials = initials(authorName),
                 colors = listOf(Cyan, Blue, Violet),
-                verified = true
+                verified = false,
+                avatarUrl = authorAvatarUrl
             ),
             time = relativeTime(createdAt),
             body = text,
-            topic = if (isVideo) "Video" else "Gündem",
+            topic = topicName ?: if (isVideo) "Video" else "Gönderi",
             artwork = if (hasMedia) ArtworkStyle.FUTURE else null,
             artworkTitle = if (hasMedia) "NSosyal medya" else null,
             artworkSubtitle = if (hasMedia) "Topluluktan yeni paylaşım" else null,
@@ -470,11 +763,72 @@ class AppState(
                 "$it. Bu açıklama saat, açık tercih ve etkileşim sinyallerinden üretildi."
             } ?: "Henüz yeterli kişisel sinyal olmadığı için yeni ve toplulukta ilgi gören içerikler dengeli gösteriliyor.",
             likeCount = (likeCount - if (likedByMe) 1 else 0).coerceAtLeast(0),
-            commentCount = 0,
+            commentCount = commentCount,
             shareCount = 0,
             mediaUrl = firstMediaUrl,
             mediaMimeType = firstMimeType
         )
+    }
+
+    private fun BackendAuthor.toCreator(): Creator = Creator(
+        id = id,
+        name = fullName,
+        handle = if (username.startsWith("@")) username else "@$username",
+        initials = initials(fullName),
+        colors = listOf(Cyan, Blue, Violet),
+        verified = false,
+        avatarUrl = avatarUrl
+    )
+
+    private fun BackendStory.toSocialStory(): SocialStory = SocialStory(
+        id = id,
+        creator = author.toCreator(),
+        style = ArtworkStyle.CULTURE,
+        headline = caption ?: "Hikâye",
+        detail = caption.orEmpty(),
+        time = relativeTime(publishedAt),
+        seen = seenByMe,
+        own = author.id == currentUser?.id,
+        mediaUrl = mediaUrl,
+        mediaMimeType = mediaMimeType
+    )
+
+    private fun BackendNotification.toSocialNotification(): SocialNotification {
+        val mappedCreator = actor?.toCreator() ?: Creator(
+            id = "system",
+            name = "N Sosyal",
+            handle = "@nsosyal",
+            initials = "NS",
+            colors = listOf(Blue, Violet),
+            verified = true
+        )
+        val (kind, message) = when (type) {
+            "FOLLOW" -> NotificationKind.FOLLOWED to "seni takip etmeye başladı."
+            "POST_LIKE" -> NotificationKind.LIKED to "gönderini beğendi."
+            "POST_COMMENT" -> NotificationKind.REPLIED to "gönderine yorum yaptı."
+            "MESSAGE" -> NotificationKind.REPLIED to "sana yeni bir mesaj gönderdi."
+            else -> NotificationKind.COMMUNITY to "N Sosyal'den yeni bir bildirimin var."
+        }
+        return SocialNotification(
+            id = id,
+            creator = mappedCreator,
+            message = message,
+            time = relativeTime(createdAt),
+            kind = kind,
+            unread = !read,
+            targetType = targetType,
+            targetId = targetId
+        )
+    }
+
+    private fun changeCommentCount(postId: String, delta: Int) {
+        fun List<SocialPost>.changed() = map { post ->
+            if (post.id == postId) post.copy(commentCount = (post.commentCount + delta).coerceAtLeast(0)) else post
+        }
+        posts = posts.changed()
+        explorePosts = explorePosts.changed()
+        searchPosts = searchPosts.changed()
+        profilePosts = profilePosts.changed()
     }
 
     private fun apiClientOrThrow(): BackendApiClient =
@@ -518,5 +872,5 @@ private fun relativeTime(value: String): String = runCatching {
     }
 }.getOrDefault("Şimdi")
 
-private fun Exception.userMessage(fallback: String): String =
+private fun Throwable.userMessage(fallback: String): String =
     (this as? BackendApiException)?.message?.takeIf(String::isNotBlank) ?: fallback
