@@ -235,6 +235,7 @@ class PersonalDataIntegrationTest {
                     FeedCandidateRecord(
                         postId = post,
                         source = CandidateSource.DISCOVERY,
+                        rank = position ?: 0,
                         rawScore = 0.1,
                         finalScore = 0.9,
                         position = position,

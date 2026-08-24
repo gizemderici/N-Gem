@@ -232,6 +232,7 @@ class TrainingExportIntegrationTest {
     private fun candidate(post: UUID, position: Int?) = FeedCandidateRecord(
         postId = post,
         source = CandidateSource.DISCOVERY,
+        rank = position ?: 0,
         rawScore = 0.2,
         finalScore = 0.8,
         position = position,

@@ -1,5 +1,6 @@
 package com.nexi.feed
 
+import com.nexi.recommendations.RankingObjectives
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
@@ -10,12 +11,27 @@ import java.util.UUID
  * Kol adı soy kütüğüne yazılır; hangi sıralamanın hangi koldan geldiği
  * sonradan ancak böyle söylenebilir.
  */
-enum class FeedVariant(val wireName: String) {
-    /** Kişiselleştirme yok; kronolojik akış. Karşılaştırmanın taban çizgisi. */
-    CONTROL("control"),
+enum class FeedVariant(val wireName: String, val objectives: RankingObjectives?) {
+    /**
+     * Kişiselleştirme yok; kronolojik akış. Karşılaştırmanın taban çizgisi.
+     * Sıralama hiç çalışmadığı için hedefi de yok.
+     */
+    CONTROL("control", null),
 
-    /** Bugünkü `nexi-contextual-v1`. */
-    HEURISTIC("heuristic"),
+    /** Bugünkü `nexi-contextual-v1`; yalnızca ilgi ve çeşitlilik. */
+    HEURISTIC("heuristic", RankingObjectives.DEFAULT),
+
+    /**
+     * Aynı sıralayıcı, güvenlik hedefi açık.
+     *
+     * Kolun ayrı bir model olması gerekmiyor: sıralamayı değiştiren şey
+     * hedef ağırlıkları. Bu sayede gölge karşılaştırması ikinci bir model
+     * yüklemeden çalışabiliyor.
+     */
+    SAFE("safe", RankingObjectives.SAFETY_FIRST),
+
+    /** Aynı sıralayıcı, üretici başına sayfa sınırı açık. */
+    FAIR("fair", RankingObjectives.CREATOR_FAIR),
 
     /**
      * Eğitilmiş model.
@@ -31,11 +47,19 @@ enum class FeedVariant(val wireName: String) {
      * kayıt "learned" derdi. Sonraki kol karşılaştırması heuristiği
      * heuristikle kıyaslayıp "fark yok" sonucuna varırdı.
      */
-    LEARNED("learned");
+    LEARNED("learned", null);
 
     companion object {
         /** Bugün gerçekten çalıştırılabilen kollar. */
-        val IMPLEMENTED: Set<FeedVariant> = setOf(CONTROL, HEURISTIC)
+        val IMPLEMENTED: Set<FeedVariant> = setOf(CONTROL, HEURISTIC, SAFE, FAIR)
+
+        /**
+         * Gölgede koşabilen kollar.
+         *
+         * Gölge, gösterilen kolla **aynı aday havuzunu** yeniden sıralıyor;
+         * kronolojik bir sıralama değil, bu yüzden `CONTROL` gölgelenemez.
+         */
+        val SHADOWABLE: Set<FeedVariant> = setOf(HEURISTIC, SAFE, FAIR)
 
         fun fromWire(raw: String): FeedVariant? =
             entries.firstOrNull { it.wireName.equals(raw.trim(), ignoreCase = true) }
@@ -74,8 +98,8 @@ data class FeedExperimentConfig(
         require(unusable.isEmpty()) {
             "bu kol henüz çalıştırılamıyor: ${unusable.joinToString { it.wireName }}"
         }
-        require(shadow == null || shadow in FeedVariant.IMPLEMENTED) {
-            "bu gölge kolu henüz çalıştırılamıyor: ${shadow?.wireName}"
+        require(shadow == null || shadow in FeedVariant.SHADOWABLE) {
+            "bu kol golgede kosamaz: ${shadow?.wireName}"
         }
     }
 

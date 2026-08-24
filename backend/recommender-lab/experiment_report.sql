@@ -81,14 +81,17 @@ SELECT
 FROM feed_requests shadow
 JOIN feed_requests real ON real.id = shadow.shadow_of
 CROSS JOIN LATERAL (
+    -- `rank_position` sıralamanın kendisi. `final_score` çeşitlendirme
+    -- öncesi puan olduğu için ona bakmak yanlış şeyi ölçerdi: çok hedefli
+    -- yeniden sıralama puanı değiştirmeden sırayı değiştiriyor.
     SELECT COUNT(*)::float / 10 AS ratio
     FROM (
         SELECT post_id FROM feed_candidates
-        WHERE feed_request_id = shadow.id ORDER BY final_score DESC LIMIT 10
+        WHERE feed_request_id = shadow.id ORDER BY rank_position LIMIT 10
     ) s
     JOIN (
         SELECT post_id FROM feed_candidates
-        WHERE feed_request_id = real.id AND position IS NOT NULL ORDER BY position LIMIT 10
+        WHERE feed_request_id = real.id ORDER BY rank_position LIMIT 10
     ) r USING (post_id)
 ) overlap
 WHERE shadow.shadow_of IS NOT NULL

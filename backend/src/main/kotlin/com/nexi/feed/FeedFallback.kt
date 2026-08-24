@@ -24,6 +24,12 @@ enum class FallbackReason {
 
     /** Aday havuzu boş; içerik yok ya da hepsi elendi. */
     NO_CANDIDATES,
+
+    /**
+     * Kolun hedef yapılandırması sıralamayı bozdu; varsayılan ağırlıklara
+     * dönüldü. Kronolojiğe düşmekten farklı: aday havuzu ve profil sağlam.
+     */
+    OBJECTIVES_ERROR,
 }
 
 data class FeedFallback(

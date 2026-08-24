@@ -49,6 +49,15 @@ data class FeedCandidateRecord(
     val source: CandidateSource,
     val rawScore: Double,
     val finalScore: Double,
+    /**
+     * Bu koşunun ürettiği sıradaki yeri.
+     *
+     * `finalScore` çeşitlendirme öncesi puan; çok hedefli yeniden sıralama
+     * puanı değiştirmeden sırayı değiştirdiği için iki koşuyu karşılaştırmak
+     * ancak bu alanla mümkün.
+     */
+    val rank: Int,
+    /** Kullanıcıya gösterildiği slot; gösterilmediyse `null`. */
     val position: Int?,
     val reason: String?,
     val likeCount: Long,
@@ -104,8 +113,9 @@ class JdbcFeedLineageRepository(private val dataSource: DataSource) : FeedLineag
                 connection.prepareStatement(
                     """INSERT INTO feed_candidates
                        (feed_request_id, post_id, candidate_source, raw_score, final_score,
-                        position, reason, like_count, comment_count, age_hours, media_type, topic_slugs)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                        position, reason, like_count, comment_count, age_hours, media_type,
+                        topic_slugs, rank_position)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
                 ).use { statement ->
                     request.candidates.forEach { candidate ->
                         statement.setObject(1, request.id)
@@ -127,6 +137,7 @@ class JdbcFeedLineageRepository(private val dataSource: DataSource) : FeedLineag
                             12,
                             connection.createArrayOf("text", candidate.topicSlugs.toTypedArray()),
                         )
+                        statement.setInt(13, candidate.rank)
                         statement.addBatch()
                     }
                     statement.executeBatch()

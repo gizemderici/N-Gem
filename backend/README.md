@@ -52,7 +52,7 @@ Bu testler normal birim testlerinden ayrı tutulur:
 .\gradlew.bat integrationTest --no-daemon
 ```
 
-`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V19`
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V20`
 migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
 konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
 senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her
@@ -430,6 +430,8 @@ uygulamayı yeniden kurmak grubu kaydırmaz.
 |---|---|
 | `control` | Kronolojik akış; karşılaştırmanın taban çizgisi |
 | `heuristic` | Bugünkü `nexi-contextual-v1` |
+| `safe` | Aynı sıralayıcı, güvenlik hedefi açık |
+| `fair` | Aynı sıralayıcı, üretici başına sayfa sınırı açık |
 | `learned` | Eğitilmiş model — **bugün yapılandırmada reddediliyor**, backend'de model yükleyen kod yok |
 
 | Değişken | Varsayılan | Açıklama |
@@ -443,17 +445,21 @@ Yanlış yazılmış bir `FEED_EXPERIMENT` değeri sessizce yok sayılmaz, uygul
 açılışta hata verir: yanlış ayarın kullanıcıların yarısını başka bir kola
 atması, fark edilmesi en zor hatalardan biri olurdu.
 
-**Gölge bugün çalışmıyor.** Yol kodda duruyor ama hiçbir geçerli
-yapılandırma onu tetikleyemiyor: `control` kolu kişiselleştirmeden önce
-dönüyor, `heuristic` kendisini gölgeleyemiyor, `learned` ise reddediliyor.
-İkinci bir sıralayıcı geldiğinde canlanacak.
-
 **Gölge çalışma.** `FEED_SHADOW_VARIANT` verildiğinde, gösterilen koldan farklı
 olması şartıyla ikinci bir sıralama hesaplanır, kullanıcıya gösterilmez ve
 `feed_requests.shadow_of` ile asıl isteğe bağlanarak kaydedilir. **Aynı** aday
 havuzu ve aynı profil anlık görüntüsü kullanılır; ayrı bir istek olarak
 koşsaydı havuz da profil de farklı olur ve iki sıralama arasındaki farkın
 modelden mi girdiden mi geldiği söylenemezdi.
+
+Gölge kolu ayrı bir model değil, **aynı sıralayıcının farklı hedef
+ağırlıkları**. Bu sayede karşılaştırma ikinci bir model yüklemeden çalışıyor;
+eğitilmiş model geldiğinde aynı yol onun sıralamasını çağıracak. `control`
+gölgelenemez — kronolojik bir sıralama, aday havuzunu yeniden sıralamıyor.
+
+Sıralamanın kendisi `feed_candidates.rank_position` kolonunda. `final_score`
+çeşitlendirme **öncesi** puan; çok hedefli yeniden sıralama puanı
+değiştirmeden sırayı değiştirdiği için ona bakmak yanlış şeyi ölçerdi.
 
 **Hata yedeği.** Sıralama sırasında beklenmedik bir hata olursa akış
 kronolojiğe düşer ve kullanıcı boş ekran görmez. Geçersiz imleç gibi istemci

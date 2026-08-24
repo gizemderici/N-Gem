@@ -16,6 +16,7 @@ import com.nexi.recommendations.EventPlatform
 import com.nexi.recommendations.FeedRecommendationContext
 import com.nexi.recommendations.RecommendationEvent
 import com.nexi.recommendations.RecommendationEventType
+import com.nexi.recommendations.RankingObjectives
 import com.nexi.recommendations.RecommendationRepository
 import com.nexi.topics.TopicService
 import io.ktor.http.HttpStatusCode
@@ -169,7 +170,17 @@ class FeedPolicy(
         }.toMap()
 
         val signals = recommendations.recentSignals(viewerId, SIGNAL_LIMIT, rankedAt)
-        val result = ranker.rankAll(viewerId, hydrated, signals, context, rankedAt)
+        val objectives = variant.objectives ?: RankingObjectives.DEFAULT
+        val result = try {
+            ranker.rankAll(viewerId, hydrated, signals, context, rankedAt, objectives)
+        } catch (error: Throwable) {
+            // Hedef yapılandırması sıralamayı bozarsa varsayılana dönüyoruz.
+            // Kronolojiğe düşmek gereksiz sert olurdu: aday havuzu ve profil
+            // sağlam, bozulan yalnızca ağırlıklar.
+            logger.warn("Objectives failed for {}, falling back to defaults", variant.wireName, error)
+            recordFallback(viewerId, FallbackReason.OBJECTIVES_ERROR, variant, error.message)
+            ranker.rankAll(viewerId, hydrated, signals, context, rankedAt, RankingObjectives.DEFAULT)
+        }
         val ranked = result.ranked
 
         val page = ranked.drop(offset).take(limit)
@@ -271,10 +282,11 @@ class FeedPolicy(
                     personalized = true,
                     durationMillis = durationMillis,
                     shadowOf = shadowOf,
-                    candidates = ranked.map { item ->
+                    candidates = ranked.mapIndexed { rank, item ->
                         val post = item.details.post
                         FeedCandidateRecord(
                             postId = post.id,
+                            rank = rank,
                             source = sourceByPost[post.id] ?: CandidateSource.DISCOVERY,
                             rawScore = item.rawScore,
                             finalScore = item.score,
@@ -319,12 +331,13 @@ class FeedPolicy(
         signals: List<com.nexi.recommendations.RecommendationSignal>,
     ) {
         val shadow = experiments.shadowFor(viewerId) ?: return
+        val shadowObjectives = shadow.objectives ?: return
         runCatching {
-            // Bugün gölgelenebilecek tek şey heuristik: eğitilmiş model henüz
-            // üretime aday değil ve backend'de yüklü bir ağırlık dosyası yok.
-            // Kol geldiğinde burası onun sıralamasını çağıracak.
-            if (shadow != FeedVariant.HEURISTIC) return
-            val result = ranker.rankAll(viewerId, hydrated, signals, context, rankedAt)
+            // Gölge kolu ayrı bir model değil, aynı sıralayıcının farklı hedef
+            // ağırlıkları. Bu sayede karşılaştırma ikinci bir model yüklemeden
+            // çalışıyor; eğitilmiş model geldiğinde burası onun sıralamasını
+            // çağıracak.
+            val result = ranker.rankAll(viewerId, hydrated, signals, context, rankedAt, shadowObjectives)
             recordLineage(
                 viewerId = viewerId,
                 requestId = UUID.randomUUID(),

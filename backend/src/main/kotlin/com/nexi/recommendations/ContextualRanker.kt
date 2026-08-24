@@ -59,9 +59,28 @@ data class RankingObjectives(
         require(creatorCap >= 0) { "üretici sınırı negatif olamaz" }
     }
 
-    /** Bugünkü üretim davranışı. */
     companion object {
+        /** Bugünkü üretim davranışı: yalnızca ilgi ve çeşitlilik. */
         val DEFAULT = RankingObjectives()
+
+        /**
+         * Güvenlik hedefi açık.
+         *
+         * Kullanıcının gizlediği içeriğe benzeyen adaylar sert cezalanır.
+         * Olumsuz yakınlık kişiselleştirme bileşeninde seyreldiği için
+         * (puan özellik sayısının kareköküne bölünüyor) uzun metinli bir
+         * gönderi güçlü bir olumsuz sinyali örtebiliyordu.
+         */
+        val SAFETY_FIRST = RankingObjectives(safetyPenalty = 3.0)
+
+        /**
+         * Üretici adaleti açık.
+         *
+         * Bir sayfada tek üreticiye en fazla iki slot. Yazar cezası doğrusal
+         * ve yeterince yüksek puanlı bir üretici tarafından aşılabiliyor;
+         * üst sınır aşılamıyor.
+         */
+        val CREATOR_FAIR = RankingObjectives(creatorCap = 2)
     }
 }
 
@@ -87,12 +106,22 @@ class ContextualRanker(
         now: Instant,
     ): List<RankedPost> = rankAll(viewerId, candidates, signals, context, now).ranked
 
+    /**
+     * @param objectives Bu koşunun hedef ağırlıkları; verilmezse
+     *   sıralayıcının kendi yapılandırması kullanılır.
+     *
+     * Deney kolları aynı sıralayıcıyı farklı hedeflerle çalıştırıyor, o
+     * yüzden çağrı başına verilebiliyor. Her kol için ayrı bir sıralayıcı
+     * nesnesi tutmak model ve özellik sürümünü de çoğaltır, ve iki kolun
+     * sürümü sessizce ayrışabilirdi.
+     */
     fun rankAll(
         viewerId: UUID,
         candidates: List<PostDetails>,
         signals: List<RecommendationSignal>,
         context: FeedRecommendationContext,
         now: Instant,
+        objectives: RankingObjectives = this.objectives,
     ): RankingResult {
         val affinities = buildAffinities(signals, context.localHour, now)
         val snapshot = affinities.mapValues { (_, value) -> rounded(value.score) }

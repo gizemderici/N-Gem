@@ -154,6 +154,7 @@ class FeedLineageIntegrationTest {
         FeedCandidateRecord(
             postId = postId,
             source = source,
+            rank = position ?: 1,
             rawScore = 0.31,
             finalScore = 1.24,
             position = position,
