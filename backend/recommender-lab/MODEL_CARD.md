@@ -118,3 +118,75 @@ tek değere sabitlendiği için ayırt edici güçleri dış veriyle ölçüleme
    karşılaştırır.
 4. Kabul kriterleri sağlanmazsa model yayınlanmaz.
 5. Sağlanırsa AI Faz 6: gölge mod, sonra küçük yüzdeyle A/B.
+
+---
+
+# `nexi-lr-demo-v1` — yerel demo modeli
+
+**Bu bir üretim modeli değil ve olamaz.** Kayıt defterinde `demo` işaretli;
+üretim kapısı bunu metriklere bakmadan reddediyor.
+
+## Ne ile eğitildi
+
+Yerel demonun kurgu davranış verisi: 12 uydurma kullanıcı, 114 gönderi ve
+`seed/demo_content.py` içindeki davranış profillerinden üretilmiş olaylar.
+Gerçek kullanıcı yok, gerçek etkileşim yok.
+
+| | |
+|---|---|
+| Eğitim satırı | 1164 (`feed_candidates`, gösterilmiş adaylar) |
+| Değerlendirme olayı | 1416 |
+| Olumlu etiket oranı | %1,03 |
+| Özellik | 22 (`nexi-learned-features-v1`) |
+
+## Karşılaştırma — ve neyi göstermediği
+
+| Politika | HitRate@10 | NDCG@10 | Coverage@10 | Yeni üretici payı |
+|---|---:|---:|---:|---:|
+| chronological | **0,4000** | **0,2812** | 0,3165 | 0,0467 |
+| popularity | 0,0000 | 0,0000 | 0,1899 | 0,0133 |
+| interest_only | 0,0667 | 0,0287 | 0,4937 | 0,0200 |
+| contextual | 0,0000 | 0,0000 | 0,4557 | 0,0467 |
+| **learned (demo)** | 0,1333 | 0,0488 | 0,1835 | **0,6000** |
+| random | 0,0000 | 0,0000 | 0,6266 | 0,3467 |
+
+**Demo modeli kronolojik tabanı geçemiyor.** Terfi denemesi bunu da ayrıca
+raporluyor:
+
+```
+HATA: üretime çıkış engellendi: demo modeli uretime cikamaz (kurgu veriyle
+egitildi); kronolojik tabanı geçmiyor: 0.133333 <= 0.4
+```
+
+**Bu sayılar gerçek kullanıcı kalitesini göstermiyor.** Sebepleri:
+
+1. **Örneklem 15 değerlendirme örneği.** Bu büyüklükte hiçbir fark anlamlı
+   değil; tek bir örneğin yer değiştirmesi HitRate'i 0,07 oynatıyor.
+2. **Kronolojik tabanın avantajı yapay.** Kurgu olaylar dar bir zaman
+   penceresinde üretildiği için hedef neredeyse her zaman en yeni içerik.
+   Gerçek trafikte bu avantaj yok.
+3. **Etiket seyrek.** Olumlu oran %1; model çoğunlukla "hayır" demeyi
+   öğreniyor, bu yüzden `bias` ağırlığı en güçlü terim.
+4. **Davranış deseni kural tabanlı.** Seed betiği "mesai saatinde teknoloji"
+   diye yazdığı için model o kuralı buluyor — kullanıcı tercihini değil,
+   betiği öğreniyor.
+
+Modelin yeni üretici payının yüksek çıkması (0,60) ilginç ama aynı sebeplerle
+bir başarı iddiası değil.
+
+## Ne işe yarıyor
+
+Hattın uçtan uca çalıştığını gösteriyor: veri çıkarma, eğitim, değerlendirme,
+kayma kontrolü, kayıt defteri ve terfi kapıları. Demo sırasında
+"kişiselleştirme nasıl ölçülüyor" sorusuna somut cevap veriyor.
+
+## Tekrar üretilebilirlik
+
+Aynı CSV ile iki kez eğitildiğinde 22 ağırlığın hepsi birebir aynı çıkıyor;
+rastgele karıştırma yok ve veri sırası sabit.
+
+```bash
+DATABASE_URL="postgres://nexi@localhost/nexi" \
+  MIN_TRAINING_ROWS=100 MODEL_VERSION=nexi-lr-demo-v1 DEMO=1 \
+  ./run_pipeline.sh
+```

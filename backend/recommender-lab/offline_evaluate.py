@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from metrics import MetricAccumulator  # noqa: E402
 from nexi_ranker import Candidate, Signal, deterministic_exploration, reward  # noqa: E402
+from learned_ranker import policy_from  # noqa: E402
 from policies import POLICIES, as_uuid  # noqa: E402
 
 MODEL_VERSION = "nexi-contextual-v1"
@@ -264,12 +265,20 @@ def evaluate(
     k: int = 10,
     max_candidates: int = 500,
     max_users: int | None = None,
+    model_path: Path | None = None,
 ) -> dict[str, object]:
     examples, new_creators, catalog_size = build_examples(events, max_candidates, max_users)
 
-    accumulators = {name: MetricAccumulator(k=k) for name in POLICIES}
+    # Egitilmis model ancak ayni hatta, ayni taban modellerle ve ayni
+    # metriklerle olculurse anlamli. Ayri bir betikte "su skoru aldi"
+    # demek kiyas noktasi olmadigi icin bir sey soylemez.
+    policies = dict(POLICIES)
+    if model_path is not None:
+        policies["learned"] = policy_from(model_path)
+
+    accumulators = {name: MetricAccumulator(k=k) for name in policies}
     for example in examples:
-        for name, policy in POLICIES.items():
+        for name, policy in policies.items():
             ranking = policy(
                 example.viewer_id,
                 list(example.candidates),
@@ -279,11 +288,11 @@ def evaluate(
             )
             accumulators[name].observe(ranking, example.target_item, new_creators, example.disliked)
 
-    policies: dict[str, dict[str, float]] = {}
+    summaries: dict[str, dict[str, float]] = {}
     for name, accumulator in accumulators.items():
         summary = accumulator.summary()
         summary[f"coverage@{k}"] = accumulator.coverage(catalog_size)
-        policies[name] = summary
+        summaries[name] = summary
 
     return {
         "model_version": MODEL_VERSION,
@@ -291,7 +300,7 @@ def evaluate(
         "evaluated_examples": len(examples),
         "catalog_size": catalog_size,
         "k": k,
-        "policies": policies,
+        "policies": summaries,
     }
 
 
@@ -307,6 +316,11 @@ def main() -> None:
         help="Deterministik değerlendirme kullanıcı örneklemi; 0 tüm kullanıcılar",
     )
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--model",
+        type=Path,
+        help="Egitilmis model dosyasi; verilirse `learned` politikasi da karsilastirmaya girer.",
+    )
     args = parser.parse_args()
     if args.k < 1 or args.max_candidates < args.k:
         parser.error("k en az 1 olmalı ve max-candidates k'dan küçük olmamalı")
@@ -316,6 +330,7 @@ def main() -> None:
         args.k,
         args.max_candidates,
         None if args.max_users == 0 else max(1, args.max_users),
+        model_path=args.model,
     )
     metrics["dataset"] = {"path": args.events.name, "sha256": dataset_checksum(args.events)}
     payload = json.dumps(metrics, ensure_ascii=False, indent=2)

@@ -252,3 +252,52 @@ class DriftTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DemoModelGateTest(unittest.TestCase):
+    """Kurgu veriyle eğitilmiş model üretime **hiç** çıkamaz.
+
+    Metrikleri iyi çıkabilir ama ölçülen şey gerçek kullanıcı davranışı
+    değil, seed betiğinin ürettiği desen. Kapıyı metriklere bırakmak, iyi
+    görünen bir demo modelinin üretime sızmasına yeterdi.
+    """
+
+    def registered(self, demo: bool, metrics: dict | None = None) -> tuple[dict, str]:
+        directory = tempfile.mkdtemp()
+        path = write_model(Path(directory))
+        registry = {"models": {}}
+        metrics_path = None
+        if metrics is not None:
+            metrics_path = Path(directory) / "metrics.json"
+            metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+        entry = register(path, metrics_path, registry, demo=demo)
+        return registry, entry["version"]
+
+    def test_a_demo_model_is_marked_as_such(self):
+        registry, version = self.registered(demo=True)
+
+        self.assertTrue(registry["models"][version]["demo"])
+
+    def test_a_normal_model_is_not_marked(self):
+        registry, version = self.registered(demo=False)
+
+        self.assertFalse(registry["models"][version]["demo"])
+
+    def test_a_demo_model_cannot_reach_production_even_with_perfect_metrics(self):
+        # Butun diger kapilardan gecen bir demo modeli bile reddedilmeli.
+        registry, version = self.registered(demo=True, metrics=offline_metrics(learned_hit=0.99))
+        promote(version, "shadow", registry)
+
+        with self.assertRaises(PromotionError) as error:
+            promote(version, "production", registry)
+
+        self.assertIn("demo modeli uretime cikamaz", str(error.exception))
+
+    def test_a_demo_model_may_still_run_in_shadow(self):
+        # Golgede olcmek serbest; gosterilmedigi icin kullaniciyi etkilemiyor.
+        registry, version = self.registered(demo=True, metrics=offline_metrics(learned_hit=0.30))
+
+        entry = promote(version, "shadow", registry)
+
+        self.assertEqual("shadow", entry["stage"])
+        self.assertTrue(entry["demo"])

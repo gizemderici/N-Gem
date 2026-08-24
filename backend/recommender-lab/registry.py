@@ -73,7 +73,12 @@ def save_registry(registry: dict, path: Path = REGISTRY) -> None:
     path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def register(model_path: Path, metrics_path: Path | None, registry: dict) -> dict:
+def register(
+    model_path: Path,
+    metrics_path: Path | None,
+    registry: dict,
+    demo: bool = False,
+) -> dict:
     model = json.loads(model_path.read_text(encoding="utf-8"))
     version = model.get("model_version")
     if not version:
@@ -88,6 +93,10 @@ def register(model_path: Path, metrics_path: Path | None, registry: dict) -> dic
     entry = {
         "version": version,
         "stage": "candidate",
+        # Kurgu veriyle egitilmis model. Uretim kapisi bunu mutlak olarak
+        # reddediyor: metrikleri iyi cikabilir ama olculen sey gercek
+        # kullanici davranisi degil, seed betiginin urettigi desen.
+        "demo": demo,
         "feature_version": model["feature_version"],
         "file": model_path.name,
         "sha256": checksum(model_path),
@@ -109,6 +118,10 @@ def register(model_path: Path, metrics_path: Path | None, registry: dict) -> dic
 def check_production_gates(entry: dict) -> list[str]:
     """Üretime çıkışı engelleyen sebepler; boş liste "geçti" demek."""
     problems: list[str] = []
+
+    if entry.get("demo"):
+        # Tek basina yeterli sebep; metriklere bakmaya bile gerek yok.
+        problems.append("demo modeli uretime cikamaz (kurgu veriyle egitildi)")
 
     if not entry.get("shadow_verified"):
         problems.append("gölge modda doğrulanmadı")
@@ -208,6 +221,11 @@ def main() -> None:
     register_parser = sub.add_parser("register", help="Yeni model sürümü kaydet")
     register_parser.add_argument("model", type=Path)
     register_parser.add_argument("--metrics", type=Path)
+    register_parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Kurgu veriyle egitildi; uretime cikisi kalici olarak engellenir.",
+    )
 
     promote_parser = sub.add_parser("promote", help="Aşama değiştir")
     promote_parser.add_argument("version")
@@ -220,7 +238,7 @@ def main() -> None:
     registry = load_registry()
 
     if args.command == "register":
-        entry = register(args.model, args.metrics, registry)
+        entry = register(args.model, args.metrics, registry, demo=args.demo)
         save_registry(registry)
         print(json.dumps(entry, ensure_ascii=False, indent=2))
     elif args.command == "promote":
@@ -238,7 +256,8 @@ def main() -> None:
         raise SystemExit(1 if problems else 0)
     elif args.command == "list":
         for version, entry in sorted(registry.get("models", {}).items()):
-            print(f"{entry['stage']:<11} {version:<20} {entry['sha256'][:12]}  {entry['registered_at']}")
+            stage = entry["stage"] + ("/demo" if entry.get("demo") else "")
+            print(f"{stage:<17} {version:<26} {entry['sha256'][:12]}  {entry['registered_at']}")
 
 
 if __name__ == "__main__":

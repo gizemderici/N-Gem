@@ -23,6 +23,12 @@ PYTHON="${PYTHON:-python3}"
 # psql yerel kurulumda olmayabilir; demo icin compose konteynerine
 # yonlendirilebilsin diye disaridan verilebiliyor.
 PSQL="${PSQL:-psql}"
+# Surum adi. Verilmezse her kosu damgayla ayri bir kayit olusturur;
+# verilirse (ornegin nexi-lr-demo-v1) sabit kalir ve kayit guncellenir.
+VERSION="${MODEL_VERSION:-${MODEL_NAME:-nexi-lr}-$STAMP}"
+# Kurgu veriyle egitiliyorsa isaretlensin; uretim kapisi bunu reddediyor.
+DEMO_FLAG=""
+if [ "${DEMO:-0}" = "1" ]; then DEMO_FLAG="--demo"; fi
 
 mkdir -p "$OUTPUT" "$MODELS"
 
@@ -45,15 +51,15 @@ fi
 echo "    $rows eğitim satırı, $events olay"
 
 echo "2/5 Model eğitiliyor"
-# Surum kayit defterinin anahtari; damgayla birlikte veriliyor ki her kosu
-# ayri bir kayit olusun. Sabit birakilirsa her egitim bir oncekini eziyor.
 "$PYTHON" "$LAB/train_ranker.py" "$OUTPUT/training-$STAMP.csv" \
-  --output "$MODELS/${MODEL_NAME:-nexi-lr}-$STAMP.json" \
-  --model-version "${MODEL_NAME:-nexi-lr}-$STAMP"
+  --output "$MODELS/$VERSION.json" \
+  --model-version "$VERSION"
 
 echo "3/5 Çevrimdışı değerlendirme"
+# Eğitilmiş model de karşılaştırmaya giriyor. Taban modeller olmadan "şu
+# skoru aldı" demek kıyas noktası bulunmadığı için bir şey söylemez.
 "$PYTHON" "$LAB/offline_evaluate.py" "$OUTPUT/events-$STAMP.csv" \
-  --k 10 --output "$OUTPUT/metrics-$STAMP.json"
+  --k 10 --model "$MODELS/$VERSION.json" --output "$OUTPUT/metrics-$STAMP.json"
 
 echo "4/5 Kayma kontrolü"
 previous="$(ls -1 "$OUTPUT"/training-*.csv 2>/dev/null | sort | tail -2 | head -1)"
@@ -67,15 +73,15 @@ else
 fi
 
 echo "5/5 Kayıt defterine ekleniyor"
-"$PYTHON" "$LAB/registry.py" register "$MODELS/${MODEL_NAME:-nexi-lr}-$STAMP.json" \
-  --metrics "$OUTPUT/metrics-$STAMP.json"
+"$PYTHON" "$LAB/registry.py" register "$MODELS/$VERSION.json" \
+  --metrics "$OUTPUT/metrics-$STAMP.json" $DEMO_FLAG
 
 cat <<EOF
 
 Hat tamamlandı. Model 'candidate' aşamasında.
 
 Sonraki adımlar elle:
-  python registry.py promote ${MODEL_NAME:-nexi-lr}-$STAMP --to shadow
+  python registry.py promote $VERSION --to shadow
   # gölgede karşılaştır: psql -f experiment_report.sql
-  python registry.py promote ${MODEL_NAME:-nexi-lr}-$STAMP --to production
+  python registry.py promote $VERSION --to production
 EOF
