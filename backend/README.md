@@ -52,7 +52,7 @@ Bu testler normal birim testlerinden ayrı tutulur:
 .\gradlew.bat integrationTest --no-daemon
 ```
 
-`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V16`
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V17`
 migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
 konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
 senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her
@@ -376,6 +376,44 @@ ikinci sayfa başka bir saatte istendiğinde sıralama kayardı.
 Havuz en fazla 300 aday tutar; bu aynı zamanda kişiselleştirilmiş akışın
 derinliği (20'lik sayfalarla 15 sayfa). `personalized=false` verildiğinde
 profil okunmaz, sunum olayı yazılmaz ve kronolojik akış döner.
+
+#### Akış soy kütüğü
+
+Her kişiselleştirilmiş istek üç tabloya yazılır ve "bu sıralama neden böyle
+oluştu" sorusu sonradan cevaplanabilir:
+
+| Tablo | İçerik |
+|---|---|
+| `feed_requests` | Model, politika ve özellik sürümü; deney varyantı; saat bağlamı; aday ve dönen sayısı |
+| `feed_candidates` | Değerlendirilen **her** aday — gösterilmeyenler dâhil — kaynağı, ham ve nihai puanı, konumu, gerekçesi |
+| `user_feature_snapshots` | Kullanıcı profilinin istek anındaki yakınlık vektörü (JSONB) |
+
+**Gelecekten bilgi sızması.** Etkileşim sayaçları, yaş ve konu listesi
+`feed_candidates` satırında dondurulur. Eğitim sırasında `posts` tablosundan
+okunsalardı geleceğin beğenileri geçmiş bir isteğe sızar ve model kendi
+sonucunu girdi olarak görürdü. `FeedLineageTest` bunu doğruluyor: kayıt
+alındıktan sonra gelen beğeniler eski satırı değiştirmiyor.
+
+**Plandan iki sapma.** `feed_exposures` ve `content_feature_snapshots` ayrı
+tablo olarak açılmadı. Gerçek gösterim zaten `recommendation_events` içinde
+`content_impression` olarak duruyor ve `feed_request_id` ile aynı isteğe
+bağlanıyor; ayrı tablo aynı veriyi iki kez yazmak olurdu. İçerik özellikleri
+ise `feed_candidates` satırına gömüldü — sızıntıyı önleyen şey tam olarak bu,
+ayrı tabloda tutulsa `post_id` üzerinden birleştirme yine güncel değeri
+getirirdi.
+
+#### Kişiselleştirme rızası
+
+| Yöntem | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/api/v1/recommendations/consent` | Rıza durumu ve kabul edilen sözleşme sürümü |
+| `PUT` | `/api/v1/recommendations/consent` | `{ "granted": true }` |
+
+Kaydı olmayan kullanıcı için varsayılan **rıza yok**: sessizce "açık" saymak
+kullanıcıyı hiç sorulmadan profillemek olurdu. Rıza yokken davranış olayı
+yazılmaz (uç `accepted: 0` döner, hata değil — rızayı geri çekmek istemciyi
+hata döngüsüne sokmamalı), akış kişiselleştirilmez ve soy kütüğü tutulmaz.
+Rıza geri çekildiğinde öğrenilmiş profil de silinir.
 
 ### Gönderi işlemleri
 

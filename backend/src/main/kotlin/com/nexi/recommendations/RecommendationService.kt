@@ -17,11 +17,19 @@ class RecommendationService(
     private val ranker: ContextualRanker,
     private val topics: TopicResolver,
     private val clock: Clock = Clock.systemUTC(),
+    private val consents: ConsentRepository = AlwaysGrantedConsentRepository,
 ) {
     fun append(userId: UUID, request: RecommendationEventBatchRequest): RecommendationEventBatchResponse {
         if (request.events.isEmpty()) return RecommendationEventBatchResponse(0, 0)
         if (request.events.size > 100) throw validation("TOO_MANY_EVENTS", "Bir istekte en fazla 100 olay gönderilebilir.", "events")
         val now = clock.instant()
+
+        // Rıza yoksa davranış olayı hiç yazılmaz. İstemciye hata değil,
+        // "hepsi yok sayıldı" dönüyoruz: rızayı geri çekmek istemciyi hata
+        // döngüsüne sokmamalı, kuyruğunu boşaltabilmeli.
+        if (!consents.find(userId).granted) {
+            return RecommendationEventBatchResponse(accepted = 0, ignored = request.events.size)
+        }
         val parsed = request.events.map { parse(userId, it, now) }
         parsed.mapNotNull(RecommendationEvent::postId).distinct().forEach { postId ->
             if (postRepository.findDetails(postId, userId) == null) {
@@ -58,6 +66,27 @@ class RecommendationService(
         repository.clear(userId)
         return MessageResponse("Öğrenilmiş öneri profili sıfırlandı.")
     }
+
+    fun consent(userId: UUID): ConsentResponse = consents.find(userId).toResponse()
+
+    /**
+     * Rıza geri çekildiğinde öğrenilmiş profil de silinir.
+     *
+     * Yalnızca bayrağı kapatmak, toplanan veriyi yerinde bırakırdı: kullanıcı
+     * kişiselleştirmeyi kapattığında geçmişinin de gitmesini bekler.
+     */
+    fun setConsent(userId: UUID, request: UpdateConsentRequest): ConsentResponse {
+        val updated = consents.set(userId, request.granted, ConsentContract.VERSION, clock.instant())
+        if (!request.granted) repository.clear(userId)
+        return updated.toResponse()
+    }
+
+    private fun RecommendationConsent.toResponse() = ConsentResponse(
+        granted = granted,
+        contractVersion = contractVersion,
+        currentContractVersion = ConsentContract.VERSION,
+        updatedAt = updatedAt?.toString(),
+    )
 
     private fun parse(userId: UUID, request: RecommendationEventRequest, receivedAt: Instant): RecommendationEvent {
         val clientEventId = request.clientEventId.uuid("clientEventId")

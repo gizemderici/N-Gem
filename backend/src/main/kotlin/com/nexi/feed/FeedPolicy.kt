@@ -9,6 +9,8 @@ import com.nexi.posts.PostDetails
 import com.nexi.posts.PostRepository
 import com.nexi.posts.PostResponse
 import com.nexi.posts.toResponse
+import com.nexi.recommendations.AlwaysGrantedConsentRepository
+import com.nexi.recommendations.ConsentRepository
 import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.EventPlatform
 import com.nexi.recommendations.FeedRecommendationContext
@@ -47,6 +49,8 @@ class FeedPolicy(
     private val ranker: ContextualRanker,
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
+    private val lineage: FeedLineageRepository = NoopFeedLineageRepository,
+    private val consents: ConsentRepository = AlwaysGrantedConsentRepository,
 ) {
     private val logger = LoggerFactory.getLogger(FeedPolicy::class.java)
     private val mediaUrlExpiry: Duration = Duration.ofMinutes(15)
@@ -62,7 +66,12 @@ class FeedPolicy(
         val cursor = rawCursor?.let { decodeCursor(it) }
 
         // Kişiselleştirme kapalıysa profil hiç okunmaz ve sunum olayı yazılmaz.
-        if (!personalizationEnabled || !recommendations.personalizationAvailable) {
+        // Rıza vermemiş kullanıcı için de aynı yol: istek `personalized=true`
+        // dese bile profil okunmaz.
+        if (!personalizationEnabled ||
+            !recommendations.personalizationAvailable ||
+            !consents.find(viewerId).granted
+        ) {
             return chronological(viewerId, cursor as? Chronological, limit)
         }
         if (cursor is Chronological) {
@@ -104,13 +113,15 @@ class FeedPolicy(
         }.toMap()
 
         val signals = recommendations.recentSignals(viewerId, SIGNAL_LIMIT, rankedAt)
-        val ranked = ranker.rank(viewerId, hydrated, signals, context, rankedAt)
+        val result = ranker.rankAll(viewerId, hydrated, signals, context, rankedAt)
+        val ranked = result.ranked
 
         val page = ranked.drop(offset).take(limit)
         if (page.isEmpty()) return FeedResponse(emptyList(), null, modelVersion = ranker.modelVersion)
 
         val requestId = UUID.randomUUID()
         recordServed(viewerId, requestId, context, page, sourceByPost, offset, now)
+        recordLineage(viewerId, requestId, context, ranked, page, sourceByPost, offset, rankedAt, result)
 
         val hasMore = offset + page.size < ranked.size
         return FeedResponse(
@@ -156,6 +167,75 @@ class FeedPolicy(
             }
         }
         return pool
+    }
+
+    /**
+     * Değerlendirilen bütün adayları, puanlarıyla ve istek anındaki etkileşim
+     * sayaçlarıyla yazar.
+     *
+     * Sayaçlar burada dondurulmasa eğitim verisi `posts` tablosundan
+     * okunurdu ve geleceğin beğenileri geçmiş bir isteğe sızardı — model
+     * kendi sonucunu girdi olarak görürdü.
+     */
+    private fun recordLineage(
+        viewerId: UUID,
+        requestId: UUID,
+        context: FeedRecommendationContext,
+        ranked: List<com.nexi.recommendations.RankedPost>,
+        page: List<com.nexi.recommendations.RankedPost>,
+        sourceByPost: Map<UUID, CandidateSource>,
+        offset: Int,
+        rankedAt: Instant,
+        result: com.nexi.recommendations.RankingResult,
+    ) {
+        val servedPositions = page.withIndex().associate { (index, item) ->
+            item.details.post.id to (offset + index)
+        }
+        runCatching {
+            lineage.record(
+                FeedRequestRecord(
+                    id = requestId,
+                    userId = viewerId,
+                    sessionId = context.sessionId,
+                    requestedAt = rankedAt,
+                    modelVersion = ranker.modelVersion,
+                    policyVersion = POLICY_VERSION,
+                    featureVersion = ranker.featureVersion,
+                    experimentVariant = null,
+                    localHour = context.localHour,
+                    timezoneOffsetMinutes = context.timezoneOffsetMinutes,
+                    personalized = true,
+                    candidates = ranked.map { item ->
+                        val post = item.details.post
+                        FeedCandidateRecord(
+                            postId = post.id,
+                            source = sourceByPost[post.id] ?: CandidateSource.DISCOVERY,
+                            rawScore = item.rawScore,
+                            finalScore = item.score,
+                            position = servedPositions[post.id],
+                            reason = item.reason,
+                            likeCount = item.details.likeCount,
+                            commentCount = item.details.commentCount,
+                            ageHours = Duration.between(post.createdAt, rankedAt).toMinutes()
+                                .coerceAtLeast(0) / 60.0,
+                            mediaType = mediaTypeOf(item.details),
+                            topicSlugs = item.details.topics.map { it.slug },
+                        )
+                    },
+                    affinities = result.affinities,
+                    signalCount = result.signalCount,
+                )
+            )
+        }.onFailure {
+            // Soy kütüğü kaydı kaybı akışı düşürmeyi hak etmez.
+            logger.warn("Could not record feed lineage: request={}", requestId, it)
+        }
+    }
+
+    private fun mediaTypeOf(details: PostDetails): String = when {
+        details.media.any { it.mimeType.startsWith("video/") } -> "video"
+        details.media.isNotEmpty() -> "image"
+        else -> "text"
     }
 
     private fun recordServed(
@@ -268,6 +348,15 @@ class FeedPolicy(
     }
 
     companion object {
+        /**
+         * Aday uretimi ve eleme kurallarinin surumu.
+         *
+         * Modelden ayri tutuluyor: siralama modeli hic degismeden aday
+         * kaynagi eklenirse akis baska sonuc verir, ve iki kosuyu
+         * karsilastirirken bunun gorunmesi gerekir.
+         */
+        const val POLICY_VERSION = "nexi-policy-v2"
+
         const val DEFAULT_LIMIT = 20
         const val MAX_LIMIT = 50
 

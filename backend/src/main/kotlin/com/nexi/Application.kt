@@ -15,6 +15,7 @@ import com.nexi.comments.commentRoutes
 import com.nexi.config.AppConfig
 import com.nexi.config.DatabaseFactory
 import com.nexi.feed.FeedPolicy
+import com.nexi.feed.JdbcFeedLineageRepository
 import com.nexi.feed.feedRoutes
 import com.nexi.media.JdbcMediaRepository
 import com.nexi.media.MediaJanitor
@@ -34,6 +35,7 @@ import com.nexi.posts.JdbcPostRepository
 import com.nexi.posts.PostService
 import com.nexi.posts.postRoutes
 import com.nexi.recommendations.ContextualRanker
+import com.nexi.recommendations.JdbcConsentRepository
 import com.nexi.recommendations.JdbcRecommendationRepository
 import com.nexi.recommendations.RecommendationService
 import com.nexi.recommendations.recommendationRoutes
@@ -104,6 +106,8 @@ fun Application.module() {
     val ranker = ContextualRanker()
     // Konu kimliklerinin tek kaynağı; ilgi olaylarını kanonik slug'a çevirir.
     val topicResolver = TopicResolver(topicRepository)
+    val consentRepository = JdbcConsentRepository(dataSource)
+    val feedLineageRepository = JdbcFeedLineageRepository(dataSource)
 
     // Bildirim üreten servislerden önce kurulmalı; hepsi bunu alıyor.
     val notificationRepository = JdbcNotificationRepository(dataSource)
@@ -121,6 +125,7 @@ fun Application.module() {
         postRepository = postRepository,
         ranker = ranker,
         topics = topicResolver,
+        consents = consentRepository,
     )
     val commentService = CommentService(JdbcCommentRepository(dataSource), objectStorage, notifications = notificationService)
     val profileRepository = JdbcProfileRepository(dataSource)
@@ -142,7 +147,14 @@ fun Application.module() {
     val searchService = SearchService(postRepository, JdbcSearchRepository(dataSource), objectStorage)
     val topicService = TopicService(topicRepository)
     // Akisin tek politikasi; hem /api/v1/feed hem /api/v1/posts/feed buna bagli.
-    val feedPolicy = FeedPolicy(postRepository, recommendationRepository, ranker, objectStorage)
+    val feedPolicy = FeedPolicy(
+        posts = postRepository,
+        recommendations = recommendationRepository,
+        ranker = ranker,
+        storage = objectStorage,
+        lineage = feedLineageRepository,
+        consents = consentRepository,
+    )
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
 
     val janitor = MediaJanitor(mediaRepository, objectStorage)

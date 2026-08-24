@@ -15,10 +15,33 @@ data class RankedPost(
     val details: PostDetails,
     val score: Double,
     val reason: String,
+    /**
+     * Yalnızca kişiselleştirme bileşeni; [score] buna güncellik, kalite ve
+     * keşif eklendikten sonraki değer. İkisini ayrı taşımak, bir gönderiyi
+     * modelin mi yoksa sadece tazeliğinin mi öne çıkardığını ayırt ediyor.
+     */
+    val rawScore: Double = 0.0,
+)
+
+/** Bir sıralama koşusunun tamamı; soy kütüğü kaydı bunun üzerinden yazılır. */
+data class RankingResult(
+    val ranked: List<RankedPost>,
+    /** Kullanıcı profilinin bu koşudaki hâli. */
+    val affinities: Map<String, Double>,
+    val signalCount: Int,
 )
 
 class ContextualRanker {
     val modelVersion = "nexi-contextual-v1"
+
+    /**
+     * Özellik çıkarımının sürümü.
+     *
+     * Modelden ayrı: aynı model farklı özellik sürümüyle başka sonuç verir,
+     * bu yüzden eğitim verisinde ikisi de kayıtlı olmalı. Konu özelliği
+     * `post_topics`'ten okunmaya başladığında sürüm 2'ye geçti.
+     */
+    val featureVersion = "nexi-features-v2"
 
     fun rank(
         viewerId: UUID,
@@ -26,9 +49,19 @@ class ContextualRanker {
         signals: List<RecommendationSignal>,
         context: FeedRecommendationContext,
         now: Instant,
-    ): List<RankedPost> {
-        if (candidates.isEmpty()) return emptyList()
+    ): List<RankedPost> = rankAll(viewerId, candidates, signals, context, now).ranked
+
+    fun rankAll(
+        viewerId: UUID,
+        candidates: List<PostDetails>,
+        signals: List<RecommendationSignal>,
+        context: FeedRecommendationContext,
+        now: Instant,
+    ): RankingResult {
         val affinities = buildAffinities(signals, context.localHour, now)
+        val snapshot = affinities.mapValues { (_, value) -> rounded(value.score) }
+        if (candidates.isEmpty()) return RankingResult(emptyList(), snapshot, signals.size)
+
         val scored = candidates.map { details ->
             val features = ContentFeatures.from(details)
             val featureScores = features.keys.mapNotNull { key -> affinities[key]?.let { key to it.score } }
@@ -38,9 +71,14 @@ class ContextualRanker {
             val quality = ln1p(details.likeCount + details.saveCount * 2.0) / 6.0
             val exploration = deterministicExploration(viewerId, details.post.id, now) * 0.10
             val score = personalized * 2.4 + freshness * 0.9 + quality * 0.35 + exploration
-            RankedPost(details, score, explanation(featureScores.maxByOrNull { abs(it.second) }, signals.isEmpty()))
+            RankedPost(
+                details = details,
+                score = score,
+                reason = explanation(featureScores.maxByOrNull { abs(it.second) }, signals.isEmpty()),
+                rawScore = personalized,
+            )
         }
-        return diversify(scored)
+        return RankingResult(diversify(scored), snapshot, signals.size)
     }
 
     fun profile(signals: List<RecommendationSignal>, currentHour: Int, now: Instant): Pair<List<RecommendationAffinityResponse>, List<RecommendationTimePreferenceResponse>> {

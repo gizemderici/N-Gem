@@ -9,6 +9,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 
 fun Route.recommendationRoutes(service: RecommendationService) {
@@ -26,6 +27,14 @@ fun Route.recommendationRoutes(service: RecommendationService) {
             }
             delete("/profile") {
                 call.respond(service.reset(call.authenticatedUserId()))
+            }
+            get("/consent") {
+                call.respond(service.consent(call.authenticatedUserId()))
+            }
+            put("/consent") {
+                call.respond(
+                    service.setConsent(call.authenticatedUserId(), call.receive<UpdateConsentRequest>())
+                )
             }
         }
     }
