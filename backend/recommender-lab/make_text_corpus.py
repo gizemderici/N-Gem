@@ -282,7 +282,11 @@ def main() -> None:
     satirlar = uret(args.count, args.seed)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
+        # `csv.writer` satır sonunu varsayılan olarak CRLF yazar. Depodaki
+        # `.gitattributes` ise `eol=lf` uyguluyor; ikisi birlikte çalışma
+        # kopyası ile depodaki içeriği ayırır ve model kartındaki SHA-256
+        # özetleri klonlayan hiç kimsede tutmazdı.
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(["metin", "duygu", "konu"])
         writer.writerows(satirlar)
     print(f"{len(satirlar)} satir -> {args.output}")

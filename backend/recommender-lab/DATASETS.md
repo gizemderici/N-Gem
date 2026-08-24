@@ -36,7 +36,7 @@ yalnızca kodun ve değerlendirme protokolünün smoke testi için kullanılır.
 
 | Dosya | Satır | Rol | SHA-256 | Kullanım durumu |
 |---|---:|---|---|---|
-| `corpus/train.csv` | 504 | Eğitim | `c9292c3ebccc14ffcbcade28dc793491bb1802c9b92b4584bff222690b7b6e0e` | Sentetik baseline |
+| `corpus/train.csv` | 504 | Eğitim | `df24dc26564dfc92735da7a1ba03770d3756669e3532b8ac100d2f1d9bd880ed` | Sentetik baseline |
 | `corpus/holdout.csv` | 60 | Geliştirme | `bcbc5a408faf565cbdb687a8bbba711e5fcfd9ec8d709ce91bbfd5de2c32b889` | Final test değildir |
 | `corpus/test.csv` | 36 | Eski test | `5088e98aa58dc9877f044c724f62782fc77591cb61e08cde1df7792dc3db8656` | Ayarlama bilgisi sızdığı için kirlenmiş |
 | `corpus/blind_test_v1.csv` | 72 | Tek-seferlik iç doğrulama | `2f9633bbd9d5c72d62d1360e50016882abbda9be33778c17b6c9af5ea5bdae0a` | Artık ayar için kullanılamaz |
