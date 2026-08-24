@@ -67,10 +67,12 @@ docker run --rm -v "$PWD:/app" -v nexi-gradle-cache:/home/gradle/.gradle -w /app
 
 ## Uçtan uca doğrulama
 
-`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 142 kontrol
+`scripts/e2e-smoke.sh` gerçek PostgreSQL, MinIO ve backend üzerinde 150 kontrol
 çalıştırır: kayıt, doğrulama, giriş, token yenileme, ilgi alanı seçimi, medya
 yükleme (görsel ve gerçek MP4), gönderi, akış, beğeni/kaydetme, yorumlar, profil,
 takip, takip içeriğinin akışa girmesi, avatar/biyografi, hikâyeler, mesajlaşma, bildirimler, arama/keşfet, engelleme/şikâyet ve öneri olayları.
+Kişiselleştirme rızası, sunucu üretimli olayların istemciden reddedilmesi ve
+rıza geri çekilince toplamanın durması da kontrol ediliyor.
 
 ```bash
 docker compose up -d --build
@@ -1004,3 +1006,57 @@ Swift istemci `NEXI_API_BASE_URL` Info.plist değerini kullanır. Varsayılan ge
 - Backend başka bir bilgisayarda çalışıyorsa Xcode target ayarlarındaki `NEXI_API_BASE_URL`, o bilgisayarın yerel ağ adresiyle değiştirilmelidir (örneğin `http://192.168.1.20:8080`).
 - Fiziksel iPhone ve backend bilgisayarı aynı ağda olmalı; güvenlik duvarı `8080` portuna izin vermelidir.
 - Üretimde HTTPS adresi kullanılmalı ve yerel HTTP istisnası kaldırılmalıdır.
+
+## Yerel demo (Demo AI Faz 10)
+
+```powershell
+.\scripts\demo.ps1
+```
+
+Betik Docker servislerini ayağa kaldırır, `/health` sağlıklı olana kadar
+bekler ve kurgu demo verilerini yükler. **Python 3 gerektirir.**
+
+Windows'ta Python yoksa seed'i Docker üzerinden koşturun:
+
+```bash
+docker compose up -d --build
+docker run --rm --network backend_default -v "$PWD:/app" -w /app \
+  python:3.12-slim python seed/seed_demo.py \
+  --base-url http://backend:8080 --skip-media-check
+```
+
+`--skip-media-check` yalnızca bu yol için: ön-imzalı medya URL'si
+`STORAGE_PUBLIC_ENDPOINT` neyse onu imzalıyor ve `localhost:9000` bir
+konteynerin içinden kendi localhost'u demek. Host'u yeniden yazmak S3
+imzasını bozar, o yüzden doğrulama atlanıyor ve rapora `skipped` olarak
+yazılıyor.
+
+**Veri kaybetmemek için `docker compose down -v` kullanmayın** — volume'ler
+silinir. Yalnızca `docker compose down` yeterli; Flyway eksik migration'ları
+bir sonraki açılışta uygular.
+
+### Doğrulama
+
+```bash
+curl -s http://127.0.0.1:8080/health
+docker compose exec -T postgres psql -U nexi -d nexi -tAc \
+  "SELECT MAX(version::int) FROM flyway_schema_history WHERE success"
+```
+
+`/health` `{"status":"ok","database":"up"}`, migration sürümü **19** dönmeli.
+AI tabloları: `recommendation_events`, `recommendation_consents`,
+`feed_requests`, `feed_candidates`, `user_feature_snapshots`,
+`feed_fallbacks`, `hidden_posts`.
+
+### Kişiselleştirme rızası şart
+
+Rıza varsayılan olarak kapalı. Açılmadan akış kronolojik kalır, öneri
+olayları `accepted: 0` ile sessizce yok sayılır ve `feed_candidates` hiç
+dolmaz — hata dönmediği için demo çalışıyor görünüp hiçbir kişiselleştirme
+göstermez. Seed betiği bunu kendisi açıyor; elle:
+
+```bash
+curl -X PUT http://127.0.0.1:8080/api/v1/recommendations/consent \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"granted":true}'
+```

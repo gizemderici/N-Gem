@@ -201,6 +201,22 @@ def upload_media(client: ApiClient, token: str, asset_name: str) -> str:
     return created["mediaId"]
 
 
+def grant_consent(client: ApiClient, tokens: dict[str, str]) -> int:
+    """Kişiselleştirme rızasını açar.
+
+    Rıza varsayılan olarak **kapalı**. Bu adım olmadan öneri olayları
+    `accepted: 0` ile sessizce yok sayılıyor, akış kronolojik kalıyor ve
+    `feed_candidates` hiç dolmuyordu — yani demo hiçbir kişiselleştirme
+    göstermiyordu ama hata da vermiyordu.
+    """
+    granted = 0
+    for username, token in tokens.items():
+        response = client.request("PUT", "/api/v1/recommendations/consent", {"granted": True}, token)
+        if response.get("granted"):
+            granted += 1
+    return granted
+
+
 def configure_users(client: ApiClient, tokens: dict[str, str], topic_ids: dict[str, str]) -> int:
     avatars_added = 0
     for user in USERS:
@@ -329,7 +345,19 @@ def seed_context_events(client: ApiClient, viewer_token: str, posts: list[dict[s
     by_text = {item["text"]: item for item in posts}
     session_id = uuid.uuid5(uuid.NAMESPACE_URL, "nsosyal-demo-context-session-v2")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    scenarios = ((0, "content_view", 11, 52_000, 0.86), (0, "content_saved", 11, None, None), (1, "content_complete", 14, 6_000, 1.0), (3, "content_liked", 21, None, None), (4, "content_complete", 21, 6_000, 1.0), (6, "content_view", 19, 40_000, 0.75), (8, "content_saved", 20, None, None))
+    # `content_liked`, `content_saved` ve `content_reported` AI Faz 1'de
+    # sunucu üretimli oldu; istemciden gelirlerse `SERVER_ONLY_EVENT` ile
+    # reddediliyorlar. Beğeni ve kaydetme sinyallerini `add_social_proof`
+    # zaten gerçek etkileşim üzerinden ürettiriyor.
+    scenarios = (
+        (0, "content_impression", 11, None, None),
+        (0, "content_view", 11, 52_000, 0.86),
+        (1, "content_complete", 14, 6_000, 1.0),
+        (3, "content_view", 21, 31_000, 0.62),
+        (4, "content_complete", 21, 6_000, 1.0),
+        (6, "content_view", 19, 40_000, 0.75),
+        (8, "content_impression", 20, None, None),
+    )
     events = []
     for post_index, event_type, hour, dwell, completion in scenarios:
         post_id = by_text[POSTS[post_index]["text"]]["id"]
@@ -344,7 +372,18 @@ def compact_feed(result: dict[str, Any], limit: int = 5) -> list[dict[str, str]]
     return [{"author": item["author"]["username"], "preview": item["text"][:72] + ("…" if len(item["text"]) > 72 else ""), "media": item["media"][0]["mimeType"] if item["media"] else "text/plain", "reason": item.get("recommendationReason") or "-"} for item in result["items"][:limit]]
 
 
-def verify_media_downloads(posts: list[dict[str, Any]]) -> dict[str, int]:
+def verify_media_downloads(posts: list[dict[str, Any]], enabled: bool = True) -> dict[str, Any]:
+    """Ön-imzalı medya URL'lerini gerçekten indirip imzalarını doğrular.
+
+    `enabled=False` yalnızca betik depolama ile aynı ağ bağlamında
+    çalışmadığında kullanılmalı. URL'nin host'u S3 imzasının içinde olduğu için
+    yeniden yazılamıyor: backend `STORAGE_PUBLIC_ENDPOINT` neyse onu imzalıyor
+    ve `localhost:9000` bir konteynerin içinden kendi localhost'u demek.
+    Atlamak bir çözüm değil, kapsam dışı bırakmak; o yüzden rapora yazılıyor.
+    """
+    if not enabled:
+        return {"skipped": True, "reason": "medya URL'si bu ağ bağlamından erişilemiyor"}
+
     checked = images = videos = 0
     for post in posts:
         for media in post["media"]:
@@ -370,6 +409,11 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
+    parser.add_argument(
+        "--skip-media-check",
+        action="store_true",
+        help="Medya URL indirme dogrulamasini atlar; betik depolama ile ayni ag baglaminda degilse gerekli.",
+    )
     args = parser.parse_args()
     client = ApiClient(args.base_url)
     if client.request("GET", "/health").get("status") != "ok":
@@ -379,6 +423,8 @@ def main() -> int:
     tokens = {user.username: authenticate(client, user) for user in USERS}
     catalog = client.request("GET", "/api/v1/topics")
     topic_ids = {item["slug"]: item["id"] for item in catalog["items"]}
+    print("[demo] Kişiselleştirme rızası veriliyor...", file=sys.stderr)
+    consented = grant_consent(client, tokens)
     print("[demo] Profiller, avatarlar ve ilgi alanları hazırlanıyor...", file=sys.stderr)
     avatars_added = configure_users(client, tokens, topic_ids)
     print("[demo] Gönderiler ve sosyal etkileşimler hazırlanıyor...", file=sys.stderr)
@@ -393,7 +439,7 @@ def main() -> int:
 
     viewer_token = tokens[USERS[0].username]
     profile = seed_context_events(client, viewer_token, posts)
-    media_smoke_test = verify_media_downloads(posts)
+    media_smoke_test = verify_media_downloads(posts, enabled=not args.skip_media_check)
     work_feed = feed(client, viewer_token, 11, True)
     evening_feed = feed(client, viewer_token, 21, True)
     notifications = client.request("GET", "/api/v1/notifications?limit=50", token=viewer_token)
@@ -402,6 +448,7 @@ def main() -> int:
     report = {
         "backend": args.base_url,
         "demoAccounts": len(USERS),
+        "personalizationConsented": consented,
         "posts": len(posts),
         "new": {"avatars": avatars_added, "posts": created_posts, "comments": created_comments, "stories": created_stories, "messages": created_messages},
         "stories": len(story_ids),
@@ -410,6 +457,9 @@ def main() -> int:
         "imagePosts": sum(bool(item["media"] and item["media"][0]["mimeType"].startswith("image/")) for item in posts),
         "videoPosts": sum(bool(item["media"] and item["media"][0]["mimeType"].startswith("video/")) for item in posts),
         "modelVersion": work_feed.get("modelVersion"),
+        # Kisisellestirme gercekten calisti mi: requestId yalnizca
+        # kisisellestirilmis akista dolar.
+        "personalizedFeed": work_feed.get("requestId") is not None,
         "mediaSmokeTest": media_smoke_test,
         "moderation": moderation,
         "profile": profile,

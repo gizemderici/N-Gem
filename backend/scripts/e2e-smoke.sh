@@ -173,11 +173,22 @@ REUSE=$(ca "$TOK_A" -X POST "$BASE/api/v1/posts" -H 'Content-Type: application/j
 
 # ---------------------------------------------------------------- 5) Akis
 step "5) Akis olusturma"
-FEED=$(ca "$TOK_A" "$BASE/api/v1/feed?limit=10")
+# AI Faz 2'de iki akis ucu tek politikada birlesti; /api/v1/feed artik
+# /api/v1/posts/feed ile ayni yaniti veriyor. Eski MixedFeedResponse alanlari
+# (personalized, mix, source) kaldirildi.
+CONSENT0=$(ca "$TOK_A" -X PUT "$BASE/api/v1/recommendations/consent" -H 'Content-Type: application/json' -d '{"granted":true}')
+printf '%s' "$CONSENT0" | grep -q '"granted":true' && ok "akis oncesi riza verildi" || bad "riza" "$CONSENT0"
+
+FEED=$(ca "$TOK_A" "$BASE/api/v1/feed?limit=10&sessionId=$(uuid)&localHour=14&timezoneOffsetMinutes=180")
 printf '%s' "$FEED" | grep -q '"items"' && ok "akis dondu" || bad "akis" "$FEED"
-[ "$(printf '%s' "$FEED" | boolf personalized)" = "true" ] && ok "personalized=true" || bad "personalized" "$FEED"
-printf '%s' "$FEED" | grep -q '"reason"' && ok "her ogede gerekce var" || bad "reason" "$FEED"
-printf '%s' "$FEED" | grep -q '"mix"' && ok "mix alani var" || bad "mix" "$FEED"
+printf '%s' "$FEED" | grep -q '"modelVersion"' && ok "kisisellestirilmis akis (modelVersion)" || bad "modelVersion" "$(printf '%s' "$FEED" | head -c 300)"
+printf '%s' "$FEED" | grep -q '"requestId"' && ok "istek kimligi dondu" || bad "requestId" "$(printf '%s' "$FEED" | head -c 300)"
+printf '%s' "$FEED" | grep -q '"candidateSource"' && ok "aday kaynagi her ogede" || bad "candidateSource" "$(printf '%s' "$FEED" | head -c 300)"
+printf '%s' "$FEED" | grep -q '"recommendationReason"' && ok "oneri gerekcesi var" || bad "recommendationReason" "$(printf '%s' "$FEED" | head -c 300)"
+
+# Iki uc ayni politikaya bagli olmali.
+POSTFEED=$(ca "$TOK_A" "$BASE/api/v1/posts/feed?limit=10&sessionId=$(uuid)&localHour=14&timezoneOffsetMinutes=180")
+printf '%s' "$POSTFEED" | grep -q '"modelVersion"' && ok "/posts/feed ayni politikayi kullaniyor" || bad "tek politika" "$(printf '%s' "$POSTFEED" | head -c 300)"
 
 BADCUR=$(ca "$TOK_A" "$BASE/api/v1/feed?cursor=bozuk")
 [ "$(printf '%s' "$BADCUR" | field code)" = "INVALID_CURSOR" ] && ok "bozuk imlec reddedildi" || bad "INVALID_CURSOR" "$BADCUR"
@@ -294,9 +305,9 @@ printf '%s' "$FLG" | grep -q "$USER_B" && ok "takip edilenler listesi" || bad "t
 
 # --------------------------------------------------- 10) Takip icerigi akista
 step "10) Takip edilen icerigin akisa girmesi"
-FEED2=$(ca "$TOK_A" "$BASE/api/v1/feed?limit=20")
-printf '%s' "$FEED2" | grep -q '"FOLLOWING"' && ok "akista FOLLOWING kaynagi var" || bad "FOLLOWING kaynagi" "$(printf '%s' "$FEED2" | head -c 300)"
-printf '%s' "$FEED2" | grep -q 'Takip ettigin\|Takip ettiğin' && ok "takip gerekcesi metni" || bad "takip gerekcesi" "$(printf '%s' "$FEED2" | grep -o '"text":"[^"]*"' | head -3)"
+FEED2=$(ca "$TOK_A" "$BASE/api/v1/feed?limit=20&sessionId=$(uuid)&localHour=14&timezoneOffsetMinutes=180")
+printf '%s' "$FEED2" | grep -q '"candidateSource":"FOLLOWING"' && ok "akista FOLLOWING kaynagi var" || bad "FOLLOWING kaynagi" "$(printf '%s' "$FEED2" | grep -o '"candidateSource":"[^"]*"' | sort -u | tr '\n' ' ')"
+printf '%s' "$FEED2" | grep -q '"recommendationReason":"[^"]' && ok "her ogede oneri gerekcesi" || bad "oneri gerekcesi" "$(printf '%s' "$FEED2" | head -c 300)"
 printf '%s' "$FEED2" | grep -q '"followedByMe":true' && ok "yazarda followedByMe=true" || bad "followedByMe" "$(printf '%s' "$FEED2" | head -c 300)"
 
 UF=$(ca "$TOK_A" -X DELETE "$BASE/api/v1/users/$USER_B/follow")
@@ -320,9 +331,15 @@ uuid() {
 }
 EV1=$(uuid); EV2=$(uuid); SESSION=$(uuid)
 
+# Riza varsayilan olarak kapali. Acilmadan once her olay accepted:0 ile
+# sessizce yok sayiliyor -- hata donmedigi icin bu betik uzun sure gecmis
+# gorunup hicbir sey olcmuyordu.
+CONSENT=$(ca "$TOK_A" -X PUT "$BASE/api/v1/recommendations/consent" -H 'Content-Type: application/json' -d '{"granted":true}')
+printf '%s' "$CONSENT" | grep -q '"granted":true' && ok "kisisellestirme rizasi verildi" || bad "riza" "$CONSENT"
+
 EV=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Type: application/json' -d "{\"events\":[
  {\"clientEventId\":\"$EV1\",\"sessionId\":\"$SESSION\",\"postId\":\"$PID_B\",\"eventType\":\"content_impression\",\"position\":0,\"localHour\":14,\"timezoneOffsetMinutes\":180,\"occurredAt\":\"$NOW\"},
- {\"clientEventId\":\"$EV2\",\"sessionId\":\"$SESSION\",\"postId\":\"$PID_B\",\"eventType\":\"content_liked\",\"localHour\":14,\"timezoneOffsetMinutes\":180,\"occurredAt\":\"$NOW\"}]}")
+ {\"clientEventId\":\"$EV2\",\"sessionId\":\"$SESSION\",\"postId\":\"$PID_B\",\"eventType\":\"content_view\",\"dwellMillis\":9000,\"localHour\":14,\"timezoneOffsetMinutes\":180,\"occurredAt\":\"$NOW\"}]}")
 [ "$(printf '%s' "$EV" | num accepted)" = "2" ] && ok "iki olay kabul edildi" || bad "olay gonderimi" "$EV"
 
 DUP=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Type: application/json' -d "{\"events\":[
@@ -333,8 +350,26 @@ BADID=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Ty
  {\"clientEventId\":\"uuid-degil\",\"sessionId\":\"$SESSION\",\"eventType\":\"session_started\",\"localHour\":14,\"timezoneOffsetMinutes\":180,\"occurredAt\":\"$NOW\"}]}")
 [ "$(printf '%s' "$BADID" | field code)" = "INVALID_ID" ] && ok "UUID olmayan olay kimligi reddedildi" || bad "INVALID_ID" "$BADID"
 
+SRV=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Type: application/json' -d "{\"events\":[
+ {\"clientEventId\":\"$(uuid)\",\"sessionId\":\"$SESSION\",\"postId\":\"$PID_B\",\"eventType\":\"content_liked\",\"localHour\":14,\"timezoneOffsetMinutes\":180,\"occurredAt\":\"$NOW\"}]}")
+[ "$(printf '%s' "$SRV" | field code)" = "SERVER_ONLY_EVENT" ] && ok "sunucu uretimli olay istemciden reddedildi" || bad "SERVER_ONLY_EVENT" "$SRV"
+
 RP=$(ca "$TOK_A" "$BASE/api/v1/recommendations/profile?localHour=14")
 printf '%s' "$RP" | grep -q '"eventCount"' && ok "oneri profili okundu" || bad "oneri profili" "$RP"
+
+EXP=$(ca "$TOK_A" "$BASE/api/v1/recommendations/export")
+printf '%s' "$EXP" | grep -q '"feedCandidates"' && ok "disa aktarma aday kayitlarini iceriyor" || bad "disa aktarma" "$EXP"
+
+# Riza geri cekilince toplama durmali ve profil silinmeli.
+ca "$TOK_A" -X PUT "$BASE/api/v1/recommendations/consent" -H 'Content-Type: application/json' -d '{"granted":false}' >/dev/null
+OFF=$(ca "$TOK_A" -X POST "$BASE/api/v1/recommendations/events" -H 'Content-Type: application/json' -d "{\"events\":[
+ {\"clientEventId\":\"$(uuid)\",\"sessionId\":\"$SESSION\",\"postId\":\"$PID_B\",\"eventType\":\"content_impression\",\"localHour\":14,\"timezoneOffsetMinutes\":180,\"occurredAt\":\"$NOW\"}]}")
+[ "$(printf '%s' "$OFF" | num accepted)" = "0" ] && ok "riza yokken olay yazilmadi" || bad "riza kapali toplama" "$OFF"
+[ "$(printf '%s' "$(ca "$TOK_A" "$BASE/api/v1/recommendations/profile?localHour=14")" | num eventCount)" = "0" ] \
+  && ok "riza geri cekilince profil silindi" || bad "riza geri cekme"
+
+# Demonun geri kalani kisisellestirilmis akis bekliyor; rizayi geri aciyoruz.
+ca "$TOK_A" -X PUT "$BASE/api/v1/recommendations/consent" -H 'Content-Type: application/json' -d '{"granted":true}' >/dev/null
 
 # ------------------------------------------------------------- 11a) Hikayeler
 step "11a) Hikayeler"
