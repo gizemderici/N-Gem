@@ -158,6 +158,15 @@ data class FeedExperimentConfig(
  */
 class FeedExperiments(private val config: FeedExperimentConfig) {
 
+    /**
+     * Deney gerçekten koşuyor mu.
+     *
+     * Öldürme anahtarı kapalıyken [variantFor] de `CONTROL` döndürüyor, ama
+     * o bir kol değil; ikisini ayırmadan "kontrol kolu" ölçümü kapalı deneyin
+     * bütün trafiğini temel çizgi sanardı.
+     */
+    val running: Boolean get() = config.enabled
+
     fun variantFor(userId: UUID): FeedVariant {
         if (!config.enabled) return FeedVariant.CONTROL
         val total = config.totalWeight

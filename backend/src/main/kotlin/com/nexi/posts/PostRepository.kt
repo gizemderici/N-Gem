@@ -448,6 +448,8 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
             CandidateSource.POPULAR -> "NOT ${followed()} AND ${engagement()} >= $POPULAR_MIN_ENGAGEMENT"
             CandidateSource.NEW_CREATOR -> "NOT ${followed()} AND ${followerCount()} <= $NEW_CREATOR_MAX_FOLLOWERS"
             CandidateSource.DISCOVERY -> "NOT ${followed()} AND NOT ${anySelected()} AND NOT ${anyRelated()}"
+            CandidateSource.CHRONOLOGICAL ->
+                error("CHRONOLOGICAL bir aday kaynagi degil; kontrol kolu posts.feed() kullanir")
         }
     }
 

@@ -47,8 +47,9 @@ data class FeedRequestRecord(
 data class FeedCandidateRecord(
     val postId: UUID,
     val source: CandidateSource,
-    val rawScore: Double,
-    val finalScore: Double,
+    /** Kronolojik kontrol kolunda puan yok; 0.0 yazmak puan analizini kirletirdi. */
+    val rawScore: Double?,
+    val finalScore: Double?,
     /**
      * Bu koşunun ürettiği sıradaki yeri.
      *
@@ -121,8 +122,8 @@ class JdbcFeedLineageRepository(private val dataSource: DataSource) : FeedLineag
                         statement.setObject(1, request.id)
                         statement.setObject(2, candidate.postId)
                         statement.setString(3, candidate.source.name)
-                        statement.setDouble(4, candidate.rawScore)
-                        statement.setDouble(5, candidate.finalScore)
+                        setNullableDouble(statement, 4, candidate.rawScore)
+                        setNullableDouble(statement, 5, candidate.finalScore)
                         if (candidate.position == null) {
                             statement.setNull(6, java.sql.Types.INTEGER)
                         } else {
@@ -165,6 +166,11 @@ class JdbcFeedLineageRepository(private val dataSource: DataSource) : FeedLineag
                 connection.autoCommit = true
             }
         }
+    }
+
+    private fun setNullableDouble(statement: java.sql.PreparedStatement, index: Int, value: Double?) {
+        if (value == null) statement.setNull(index, java.sql.Types.DOUBLE)
+        else statement.setDouble(index, value)
     }
 
     private fun jsonb(value: Map<String, Double>): PGobject = PGobject().apply {

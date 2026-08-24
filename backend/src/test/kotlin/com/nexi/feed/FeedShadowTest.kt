@@ -121,6 +121,8 @@ class FeedShadowTest {
         assertEquals(2, page.items.size)
         assertNull(page.modelVersion, "profil okunmamalı")
         assertNull(page.requestId)
+        // Öldürme anahtarı öneri verisi yazmayı da durdurur; kontrol kolunun
+        // soy kütüğü buraya uygulanmaz.
         assertTrue(lineage.recorded.isEmpty())
     }
 
@@ -133,7 +135,12 @@ class FeedShadowTest {
         ).feed(viewerId, null, 2, context)
 
         assertNull(page.modelVersion)
-        assertTrue(lineage.recorded.isEmpty())
+        // Kullanıcıya giden yanıt kişiselleştirilmemiş, ama kol ölçülebilmeli:
+        // kontrol kolu kaydedilmezse kolları karşılaştıran raporlarda temel
+        // çizgi olmaz.
+        val request = lineage.recorded.single()
+        assertEquals(FeedVariant.CONTROL.wireName, request.experimentVariant)
+        assertEquals(false, request.personalized)
     }
 
     @Test

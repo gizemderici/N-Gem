@@ -56,6 +56,22 @@ enum class CandidateSource {
 
     /** Yukarıdakilerin hiçbirine girmeyen keşif içeriği. */
     DISCOVERY,
+
+    /**
+     * Kronolojik kontrol kolu.
+     *
+     * Bir aday kaynağı değil: kontrol kolunda aday üretimi hiç çalışmıyor,
+     * akış doğrudan zaman sırası. Yalnızca soy kütüğünde bu satırların
+     * sıralanmış adaylarla karışmaması için var, bu yüzden [GENERATED]
+     * dışında.
+     */
+    CHRONOLOGICAL,
+    ;
+
+    companion object {
+        /** Aday havuzunu gerçekten dolduran kaynaklar. */
+        val GENERATED: List<CandidateSource> = entries - CHRONOLOGICAL
+    }
 }
 
 data class Post(

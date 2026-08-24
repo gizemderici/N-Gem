@@ -391,6 +391,16 @@ kanitlanmadan yeni hedefleri herkese acmak, olcemedigimiz bir degisikligi
 uretime sokmak olurdu. Acilmalari deney kolu uzerinden ve Faz 8 kapilarindan
 gecerek yapilmali. Ayrinti [`docs/ai-roadmap.md`](docs/ai-roadmap.md).
 
+Dort kol ayni demo kullanicilariyla olculdu; sonuclar ve olculemeyenler
+[`docs/arm-comparison.md`](docs/arm-comparison.md) belgesinde. Ozet: siralama
+kronolojikten gercekten farkli (ilk on icerikte ortusme 0,04) ama `safe` ve
+`fair` bu veri kumesinde `heuristic`ten ayirt edilemiyor, ve kisisellestirilmis
+akisin p50 gecikmesi ~3,4 saniye. Olcumu tekrarlamak icin:
+
+```bash
+./scripts/compare-arms.sh
+```
+
 Havuz en fazla 300 aday tutar; bu aynı zamanda kişiselleştirilmiş akışın
 derinliği (20'lik sayfalarla 15 sayfa). `personalized=false` verildiğinde
 profil okunmaz, sunum olayı yazılmaz ve kronolojik akış döner.

@@ -63,6 +63,38 @@ class FeedLineageTest {
         ).id
     )
 
+    @Test
+    fun `the chronological control arm is recorded too`() {
+        repeat(3) { publish("Gönderi $it") }
+        val control = FeedPolicy(
+            posts = postRepository,
+            recommendations = AvailableRecommendationRepository,
+            ranker = ranker,
+            storage = storage,
+            clock = clock,
+            lineage = lineage,
+            consents = consents,
+            experiments = FeedExperiments(
+                FeedExperimentConfig(weights = mapOf(FeedVariant.CONTROL to 1))
+            ),
+        )
+
+        control.feed(viewerId, null, 5, context)
+
+        // Kontrol kolu yalnızca `feed_fallbacks`'e yazsaydı kolları
+        // karşılaştıran her rapor temel çizgisiz kalırdı.
+        val request = lineage.recorded.single()
+        assertEquals(FeedVariant.CONTROL.wireName, request.experimentVariant)
+        assertEquals(false, request.personalized)
+        assertEquals("chronological", request.modelVersion)
+        assertEquals(3, request.candidates.size)
+        // Kronolojik akışta puan yok; 0.0 yazmak puan dağılımına bakan her
+        // sorguyu yanıltırdı.
+        assertTrue(request.candidates.all { it.finalScore == null && it.rawScore == null })
+        assertEquals(listOf(0, 1, 2), request.candidates.map { it.position })
+        assertTrue(request.candidates.all { it.source == CandidateSource.CHRONOLOGICAL })
+    }
+
     // ------------------------------------------------------- aciklanabilirlik
 
     @Test
@@ -104,7 +136,7 @@ class FeedLineageTest {
         assertEquals(CandidateSource.NEW_CREATOR, candidate.source)
         assertEquals(listOf("teknoloji"), candidate.topicSlugs)
         assertEquals("text", candidate.mediaType)
-        assertTrue(candidate.finalScore > 0.0)
+        assertTrue((candidate.finalScore ?: 0.0) > 0.0)
         assertNotNull(candidate.reason)
     }
 

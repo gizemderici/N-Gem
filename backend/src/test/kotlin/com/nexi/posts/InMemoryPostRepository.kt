@@ -203,6 +203,8 @@ internal class InMemoryPostRepository(
                 !followsAuthor && engagement >= POPULAR_MIN_ENGAGEMENT
             CandidateSource.NEW_CREATOR ->
                 !followsAuthor && followerCount <= NEW_CREATOR_MAX_FOLLOWERS
+            CandidateSource.CHRONOLOGICAL ->
+                error("CHRONOLOGICAL bir aday kaynagi degil; kontrol kolu feed() kullanir")
             CandidateSource.DISCOVERY -> !followsAuthor && !anySelected && !anyRelated
         }
     }

@@ -84,13 +84,24 @@ class FeedPolicy(
             // beklenmedik sebepler kaydediliyor ki alarm oranı gürültüye
             // boğulmasın.
             if (personalizationEnabled) recordFallback(viewerId, skipReason, variant, null)
-            return chronological(viewerId, cursor as? Chronological, limit)
+            // Soy kütüğü yalnızca *çalışan bir deneyin* kontrol kolu için
+            // yazılıyor. Öldürme anahtarı da CONTROL döndürüyor ama o bir kol
+            // değil, öneri verisi yazmayı durdurma kararı; rızası olmayan
+            // kullanıcı da buraya düşüyor ve `feed_requests` kişisel veri
+            // taşıyor. İkisinde de kayıt yanlış olurdu.
+            val controlArm = skipReason == FallbackReason.EXPERIMENT_DISABLED &&
+                experiments.running &&
+                personalizationEnabled &&
+                variant == FeedVariant.CONTROL &&
+                recommendations.personalizationAvailable &&
+                consents.find(viewerId).granted
+            return chronological(viewerId, cursor as? Chronological, limit, context, controlArm)
         }
         if (cursor is Chronological) {
             // Kullanıcı akış ortasında kişiselleştirmeyi açtıysa kronolojik
             // imleçle devam etmek doğru; yeni sıralamaya atlamak okuduğu yeri
             // kaybettirirdi.
-            return chronological(viewerId, cursor, limit)
+            return chronological(viewerId, cursor, limit, context, recordControl = false)
         }
 
         // Sıralama hatası akışı düşürmeyi hak etmez: kullanıcı bozuk bir model
@@ -107,7 +118,9 @@ class FeedPolicy(
                 variant,
                 "${error::class.simpleName}: ${error.message}",
             )
-            chronological(viewerId, null, limit)
+            // Hata yolu bilerek kayitsiz: burayi kontrol kolu gibi yazmak
+            // ariza trafigini temel cizgiye karistirirdi.
+            chronological(viewerId, null, limit, context = null, recordControl = false)
         }
     }
 
@@ -225,7 +238,7 @@ class FeedPolicy(
     private fun gather(viewerId: UUID, rankedAt: Instant): List<Candidate> {
         val seen = mutableSetOf<UUID>()
         val pool = mutableListOf<Candidate>()
-        for (source in CandidateSource.entries) {
+        for (source in CandidateSource.GENERATED) {
             if (pool.size >= MAX_POOL) break
             val rows = runCatching {
                 posts.candidates(viewerId, source, TopicService.PRIORITY_TOPIC_COUNT, rankedAt, PER_SOURCE)
@@ -249,6 +262,62 @@ class FeedPolicy(
      * okunurdu ve geleceğin beğenileri geçmiş bir isteğe sızardı — model
      * kendi sonucunu girdi olarak görürdü.
      */
+    /**
+     * Kronolojik kontrol kolunun soy kütüğü.
+     *
+     * Aday üretimi yok, bu yüzden havuz gösterilen sayfanın kendisi; puan da
+     * yok. Sürüm alanları `chronological`/`none` yazılıyor ki rapor okurken
+     * kontrol kolu bir modelmiş gibi görünmesin.
+     */
+    private fun recordChronologicalLineage(
+        viewerId: UUID,
+        items: List<PostDetails>,
+        context: FeedRecommendationContext,
+        startedAt: Instant,
+    ) {
+        val now = clock.instant()
+        runCatching {
+            lineage.record(
+                FeedRequestRecord(
+                    id = UUID.randomUUID(),
+                    userId = viewerId,
+                    sessionId = context.sessionId,
+                    requestedAt = now,
+                    modelVersion = "chronological",
+                    policyVersion = POLICY_VERSION,
+                    featureVersion = "none",
+                    experimentVariant = FeedVariant.CONTROL.wireName,
+                    localHour = context.localHour,
+                    timezoneOffsetMinutes = context.timezoneOffsetMinutes,
+                    personalized = false,
+                    durationMillis = Duration.between(startedAt, now).toMillis().toInt(),
+                    shadowOf = null,
+                    candidates = items.mapIndexed { index, details ->
+                        FeedCandidateRecord(
+                            postId = details.post.id,
+                            rank = index,
+                            source = CandidateSource.CHRONOLOGICAL,
+                            rawScore = null,
+                            finalScore = null,
+                            position = index,
+                            reason = null,
+                            likeCount = details.likeCount,
+                            commentCount = details.commentCount,
+                            ageHours = Duration.between(details.post.createdAt, now).toMinutes()
+                                .coerceAtLeast(0) / 60.0,
+                            mediaType = mediaTypeOf(details),
+                            topicSlugs = details.topics.map { it.slug },
+                        )
+                    },
+                    affinities = emptyMap(),
+                    signalCount = 0,
+                )
+            )
+        }.onFailure {
+            logger.warn("Could not record chronological lineage for {}", viewerId, it)
+        }
+    }
+
     private fun recordLineage(
         viewerId: UUID,
         requestId: UUID,
@@ -405,10 +474,23 @@ class FeedPolicy(
 
     // ---------------------------------------------------------- kronolojik
 
-    private fun chronological(viewerId: UUID, cursor: Chronological?, limit: Int): FeedResponse {
+    private fun chronological(
+        viewerId: UUID,
+        cursor: Chronological?,
+        limit: Int,
+        context: FeedRecommendationContext?,
+        recordControl: Boolean,
+    ): FeedResponse {
+        val startedAt = clock.instant()
         val details = posts.feed(viewerId, cursor?.let { FeedCursor(it.createdAt, it.id) }, limit + 1)
         val hasMore = details.size > limit
         val items = details.take(limit)
+        // Kontrol kolu da olculebilmeli. Yalnizca `feed_fallbacks`'e yazmak
+        // temel cizgiyi butun karsilastirma raporlarindan disarida birakiyordu:
+        // kollari kiyaslarken kiyaslanacak taban yoktu.
+        if (recordControl && context != null) {
+            recordChronologicalLineage(viewerId, items, context, startedAt)
+        }
         return FeedResponse(
             items = items.map { it.toResponse(storage, mediaUrlExpiry) },
             nextCursor = if (hasMore) {
