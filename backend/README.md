@@ -52,7 +52,7 @@ Bu testler normal birim testlerinden ayrı tutulur:
 .\gradlew.bat integrationTest --no-daemon
 ```
 
-`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V17`
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V18`
 migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
 konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
 senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her
@@ -401,6 +401,46 @@ bağlanıyor; ayrı tablo aynı veriyi iki kez yazmak olurdu. İçerik özellikl
 ise `feed_candidates` satırına gömüldü — sızıntıyı önleyen şey tam olarak bu,
 ayrı tabloda tutulsa `post_id` üzerinden birleştirme yine güncel değeri
 getirirdi.
+
+#### Deney kolları ve gölge çalışma
+
+Akış üç kola ayrılabilir. Kol atama kullanıcı kimliğinin özetinden gelir ve
+kayıt tutulmaz: kullanıcı her istekte aynı kola düşer, oturum değiştirmek ya da
+uygulamayı yeniden kurmak grubu kaydırmaz.
+
+| Kol | Ne döner |
+|---|---|
+| `control` | Kronolojik akış; karşılaştırmanın taban çizgisi |
+| `heuristic` | Bugünkü `nexi-contextual-v1` |
+| `learned` | Eğitilmiş model — bugün yalnızca gölgede anlamlı, yüklü ağırlık dosyası yok |
+
+| Değişken | Varsayılan | Açıklama |
+|---|---|---|
+| `FEED_PERSONALIZATION_ENABLED` | `true` | **Öldürme anahtarı.** `false` herkesi kronolojiğe alır |
+| `FEED_EXPERIMENT` | `heuristic:1` | Kol ağırlıkları, örn. `control:1,heuristic:9` |
+| `FEED_SHADOW_VARIANT` | — | Gölgede hesaplanacak kol |
+| `FEED_EXPERIMENT_SALT` | `nexi-feed-v1` | Grupları kasten kaydırmak için |
+
+Yanlış yazılmış bir `FEED_EXPERIMENT` değeri sessizce yok sayılmaz, uygulama
+açılışta hata verir: yanlış ayarın kullanıcıların yarısını başka bir kola
+atması, fark edilmesi en zor hatalardan biri olurdu.
+
+**Gölge çalışma.** `FEED_SHADOW_VARIANT` verildiğinde, gösterilen koldan farklı
+olması şartıyla ikinci bir sıralama hesaplanır, kullanıcıya gösterilmez ve
+`feed_requests.shadow_of` ile asıl isteğe bağlanarak kaydedilir. **Aynı** aday
+havuzu ve aynı profil anlık görüntüsü kullanılır; ayrı bir istek olarak
+koşsaydı havuz da profil de farklı olur ve iki sıralama arasındaki farkın
+modelden mi girdiden mi geldiği söylenemezdi.
+
+**Hata yedeği.** Sıralama sırasında beklenmedik bir hata olursa akış
+kronolojiğe düşer ve kullanıcı boş ekran görmez. Geçersiz imleç gibi istemci
+hataları bu yedeğe girmez; sessizce başka bir sayfa döndürmek hatayı gizlerdi.
+
+**Sonuç paneli** [`recommender-lab/experiment_report.sql`](recommender-lab/experiment_report.sql):
+kol başına olumlu/olumsuz oran, üretici çeşitliliği ve gölge–gerçek örtüşmesi.
+Otomatik geri alma **henüz yok** — eşikler sorguda tanımlı ama bir kolu kapatmak
+bugün elle yapılıyor; otomatik tetikleme ölçüm toplayan bir izleme sistemi
+gerektiriyor.
 
 #### Kişiselleştirme rızası
 

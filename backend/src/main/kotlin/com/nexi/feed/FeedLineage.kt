@@ -26,6 +26,8 @@ data class FeedRequestRecord(
     val localHour: Int,
     val timezoneOffsetMinutes: Int,
     val personalized: Boolean,
+    /** Golge kosusuysa asil istegin kimligi. */
+    val shadowOf: UUID? = null,
     val candidates: List<FeedCandidateRecord>,
     val affinities: Map<String, Double>,
     val signalCount: Int,
@@ -72,8 +74,8 @@ class JdbcFeedLineageRepository(private val dataSource: DataSource) : FeedLineag
                     """INSERT INTO feed_requests
                        (id, user_id, session_id, requested_at, model_version, policy_version,
                         feature_version, experiment_variant, local_hour, timezone_offset_minutes,
-                        personalized, candidate_count, returned_count)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                        personalized, candidate_count, returned_count, shadow_of)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
                 ).use { statement ->
                     statement.setObject(1, request.id)
                     statement.setObject(2, request.userId)
@@ -88,6 +90,7 @@ class JdbcFeedLineageRepository(private val dataSource: DataSource) : FeedLineag
                     statement.setBoolean(11, request.personalized)
                     statement.setInt(12, request.candidates.size)
                     statement.setInt(13, request.returnedCount)
+                    statement.setObject(14, request.shadowOf)
                     statement.executeUpdate()
                 }
 

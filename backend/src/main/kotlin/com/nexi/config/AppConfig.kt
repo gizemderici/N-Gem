@@ -17,6 +17,12 @@ data class AppConfig(
     val abandonedUploadTtlHours: Long = 24,
     /** Bu süreden eski bildirimler temizlenir. */
     val notificationRetentionDays: Long = 30,
+    /**
+     * Akış deneyi. `enabled = false` tek ayarla her şeyi kronolojiğe döndüren
+     * öldürme anahtarı; model hatası fark edildiğinde yeni sürüm beklemek
+     * zorunda kalmamak gerekir.
+     */
+    val feedExperiment: com.nexi.feed.FeedExperimentConfig = com.nexi.feed.FeedExperimentConfig(),
 ) {
     val isProduction: Boolean get() = environment.equals("production", ignoreCase = true)
 
@@ -60,6 +66,13 @@ data class AppConfig(
                 trustProxyHeaders = env.boolean("TRUST_PROXY_HEADERS", false),
                 abandonedUploadTtlHours = env.long("ABANDONED_UPLOAD_TTL_HOURS", 24),
                 notificationRetentionDays = env.long("NOTIFICATION_RETENTION_DAYS", 30),
+                feedExperiment = com.nexi.feed.FeedExperimentConfig.parse(
+                    raw = env["FEED_EXPERIMENT"],
+                    // Öldürme anahtarı: `false` her kullanıcıyı kronolojiğe alır.
+                    enabled = env["FEED_PERSONALIZATION_ENABLED"]?.toBooleanStrictOrNull() ?: true,
+                    shadow = env["FEED_SHADOW_VARIANT"],
+                    salt = env["FEED_EXPERIMENT_SALT"] ?: "nexi-feed-v1",
+                ),
             )
         }
     }

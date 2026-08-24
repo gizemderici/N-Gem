@@ -14,6 +14,7 @@ import com.nexi.comments.JdbcCommentRepository
 import com.nexi.comments.commentRoutes
 import com.nexi.config.AppConfig
 import com.nexi.config.DatabaseFactory
+import com.nexi.feed.FeedExperiments
 import com.nexi.feed.FeedPolicy
 import com.nexi.feed.JdbcFeedLineageRepository
 import com.nexi.feed.feedRoutes
@@ -154,6 +155,7 @@ fun Application.module() {
         storage = objectStorage,
         lineage = feedLineageRepository,
         consents = consentRepository,
+        experiments = FeedExperiments(config.feedExperiment),
     )
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
 

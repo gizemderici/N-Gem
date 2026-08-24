@@ -51,6 +51,7 @@ class FeedPolicy(
     private val clock: Clock = Clock.systemUTC(),
     private val lineage: FeedLineageRepository = NoopFeedLineageRepository,
     private val consents: ConsentRepository = AlwaysGrantedConsentRepository,
+    private val experiments: FeedExperiments = FeedExperiments(FeedExperimentConfig()),
 ) {
     private val logger = LoggerFactory.getLogger(FeedPolicy::class.java)
     private val mediaUrlExpiry: Duration = Duration.ofMinutes(15)
@@ -67,9 +68,12 @@ class FeedPolicy(
 
         // Kişiselleştirme kapalıysa profil hiç okunmaz ve sunum olayı yazılmaz.
         // Rıza vermemiş kullanıcı için de aynı yol: istek `personalized=true`
-        // dese bile profil okunmaz.
+        // dese bile profil okunmaz. Deney kolu CONTROL ise ve öldürme anahtarı
+        // kapalıysa da buraya düşülür.
+        val variant = experiments.variantFor(viewerId)
         if (!personalizationEnabled ||
             !recommendations.personalizationAvailable ||
+            variant == FeedVariant.CONTROL ||
             !consents.find(viewerId).granted
         ) {
             return chronological(viewerId, cursor as? Chronological, limit)
@@ -80,7 +84,17 @@ class FeedPolicy(
             // kaybettirirdi.
             return chronological(viewerId, cursor, limit)
         }
-        return personalized(viewerId, cursor as? Personalized, limit, context)
+
+        // Sıralama hatası akışı düşürmeyi hak etmez: kullanıcı bozuk bir model
+        // yüzünden boş ekran görmemeli, kronolojiğe düşmeli.
+        return try {
+            personalized(viewerId, cursor as? Personalized, limit, context, variant)
+        } catch (error: ApiException) {
+            throw error
+        } catch (error: Throwable) {
+            logger.error("Personalized feed failed, falling back to chronological", error)
+            chronological(viewerId, null, limit)
+        }
     }
 
     // ------------------------------------------------------ kişiselleştirme
@@ -90,6 +104,7 @@ class FeedPolicy(
         cursor: Personalized?,
         limit: Int,
         requested: FeedRecommendationContext?,
+        variant: FeedVariant,
     ): FeedResponse {
         val now = clock.instant()
         val rankedAt = cursor?.rankedAt ?: now
@@ -121,7 +136,11 @@ class FeedPolicy(
 
         val requestId = UUID.randomUUID()
         recordServed(viewerId, requestId, context, page, sourceByPost, offset, now)
-        recordLineage(viewerId, requestId, context, ranked, page, sourceByPost, offset, rankedAt, result)
+        recordLineage(
+            viewerId, requestId, context, ranked, page, sourceByPost, offset, rankedAt, result,
+            variant = variant, shadowOf = null,
+        )
+        recordShadow(viewerId, requestId, context, hydrated, sourceByPost, rankedAt, signals)
 
         val hasMore = offset + page.size < ranked.size
         return FeedResponse(
@@ -187,6 +206,8 @@ class FeedPolicy(
         offset: Int,
         rankedAt: Instant,
         result: com.nexi.recommendations.RankingResult,
+        variant: FeedVariant,
+        shadowOf: UUID?,
     ) {
         val servedPositions = page.withIndex().associate { (index, item) ->
             item.details.post.id to (offset + index)
@@ -201,10 +222,11 @@ class FeedPolicy(
                     modelVersion = ranker.modelVersion,
                     policyVersion = POLICY_VERSION,
                     featureVersion = ranker.featureVersion,
-                    experimentVariant = null,
+                    experimentVariant = variant.wireName,
                     localHour = context.localHour,
                     timezoneOffsetMinutes = context.timezoneOffsetMinutes,
                     personalized = true,
+                    shadowOf = shadowOf,
                     candidates = ranked.map { item ->
                         val post = item.details.post
                         FeedCandidateRecord(
@@ -229,6 +251,52 @@ class FeedPolicy(
         }.onFailure {
             // Soy kütüğü kaydı kaybı akışı düşürmeyi hak etmez.
             logger.warn("Could not record feed lineage: request={}", requestId, it)
+        }
+    }
+
+    /**
+     * Gölge koşusu: başka bir kolun sıralamasını hesaplar, kullanıcıya
+     * göstermez, yalnızca kaydeder.
+     *
+     * Aynı aday kümesi ve aynı profil anlık görüntüsü kullanılıyor. Ayrı bir
+     * istek olarak koşsaydı havuz da profil de farklı olur, ve iki sıralama
+     * arasındaki farkın modelden mi girdiden mi geldiği söylenemezdi.
+     *
+     * Gölge hatası asıl akışı etkilemez; kullanıcı ölçüm yüzünden boş ekran
+     * görmemeli.
+     */
+    private fun recordShadow(
+        viewerId: UUID,
+        servedRequestId: UUID,
+        context: FeedRecommendationContext,
+        hydrated: List<PostDetails>,
+        sourceByPost: Map<UUID, CandidateSource>,
+        rankedAt: Instant,
+        signals: List<com.nexi.recommendations.RecommendationSignal>,
+    ) {
+        val shadow = experiments.shadowFor(viewerId) ?: return
+        runCatching {
+            // Bugün gölgelenebilecek tek şey heuristik: eğitilmiş model henüz
+            // üretime aday değil ve backend'de yüklü bir ağırlık dosyası yok.
+            // Kol geldiğinde burası onun sıralamasını çağıracak.
+            if (shadow != FeedVariant.HEURISTIC) return
+            val result = ranker.rankAll(viewerId, hydrated, signals, context, rankedAt)
+            recordLineage(
+                viewerId = viewerId,
+                requestId = UUID.randomUUID(),
+                context = context,
+                ranked = result.ranked,
+                // Gölge gösterilmiyor; hiçbir adayın konumu yok.
+                page = emptyList(),
+                sourceByPost = sourceByPost,
+                offset = 0,
+                rankedAt = rankedAt,
+                result = result,
+                variant = shadow,
+                shadowOf = servedRequestId,
+            )
+        }.onFailure {
+            logger.warn("Shadow ranking failed: request={} variant={}", servedRequestId, shadow, it)
         }
     }
 
