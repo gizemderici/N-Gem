@@ -45,3 +45,76 @@ HitRate/MRR/NDCG yanında gizleme, bildirme, içerik/üretici kapsaması, gecikm
 ## İlk dış benchmark
 
 KuaiRand-Pure üzerindeki gerçek koşu ve sınırlamalar [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) dosyasında kayıtlıdır. Model standart logda popülerlik tabanından daha fazla katalog kapsaması sağlar fakat daha düşük exact-next isabeti alır; rastgele gösterim logunda popülerlik tabanını HitRate/MRR'da az farkla geçer. Bu nedenle sürüm yalnızca kontrollü ilk/gölge model olarak sınıflandırılmıştır.
+
+---
+
+# `nexi-lr-v1` — ilk eğitilmiş sıralayıcı
+
+**Durum: eğitim hattı hazır, üretime aday model yok.**
+
+## Neden lojistik regresyon
+
+Derin öğrenmeyle ya da LightGBM ile başlanmadı. Sebep yalnızca bağımlılık
+değil: bu aşamada birinci taraf veri yok, ve açıklanabilir bir doğrusal model
+hem hangi özelliğin ne yönde etkilediğini gösteriyor hem de gölge modda geri
+alınması kolay. Ağaç tabanlı modeller, doğrusal taban gerçek veriyle
+kıyaslandıktan sonra anlamlı olur.
+
+## Girdi
+
+`features.py` içindeki tek özellik fonksiyonu; eğitim ve puanlama aynı kodu
+kullanır. İkinci bir kopya, eğitim/servis sapmasının en yaygın sebebi.
+
+| Grup | Özellikler |
+|---|---|
+| Yakınlık | konu, üretici, medya, jeton ortalaması — hepsi istek anındaki anlık görüntüden |
+| İçerik | `log1p(beğeni)`, `log1p(yorum)`, güncellik, video/görsel |
+| Bağlam | günün dört zaman dilimi |
+| Aday | yedi kaynağın tek-sıcak kodlaması |
+| Soğuk başlangıç | kullanıcının hiç sinyali yok mu |
+
+Hepsi `feed_candidates` satırından ve o isteğin `user_feature_snapshots`
+kaydından okunuyor. İstek anından sonraki hiçbir bilgi girdi değil.
+
+## Etiket
+
+Sunumdan **sonra** gelen olumlu etkileşim: tamamlama, beğeni, kaydetme,
+paylaşma ya da 5 saniyeden uzun görüntüleme. Gizleme ve şikâyet ayrı bir
+`negative` kolonunda tutulur; güvenlik sınırı onun üzerinden ölçülür.
+
+Yalnızca gösterilen adaylar etiketlenir. Gösterilmeyeni "olumsuz" saymak,
+kullanıcının tepki verme şansı hiç olmadığı için modeli yanlış eğitirdi.
+
+## Model dosyası
+
+Ağırlıkların yanında eğitim ayarları, veri dosyasının SHA-256 özeti, satır
+sayısı, eğitim tarihi ve özellik sürümü yazılır. Bunlar olmadan bir tahminin
+hangi modelden geldiği sonradan söylenemez. Özellik listesi ya da sürümü
+uymayan bir dosya yüklenmez — eksik ağırlığa sessizce sıfır atamak modeli
+gizlice bozardı.
+
+## Sınırlar — üretim onayı yok
+
+Planın kabul kriterleri **karşılanmadı** ve bugünkü veriyle karşılanamaz:
+
+| Kriter | Durum |
+|---|---|
+| Zaman ayrımlı birinci taraf veride mevcut heuristiği geçmeli | **Ölçülemedi** — üretim yok, kullanıcı yok, `feed_candidates` boş |
+| Popülerlik modelinden daha iyi kişisel isabet | **Ölçülemedi** — aynı sebep |
+| Gizleme ve şikâyet oranını yükseltmemeli | **Ölçülemedi** — aynı sebep |
+| Model dosyası, veri sürümü ve eğitim ayarları kayıtlı | Karşılandı |
+
+Bu commit'te bir model dosyası **yayınlanmıyor**. Sentetik veriyle eğitilmiş
+ağırlıkları depoya koymak, sonradan gerçek sanılma riski taşır.
+
+Ek olarak, çevrimdışı veri setlerinde aday kaynağı bilgisi yok; o özellikler
+tek değere sabitlendiği için ayırt edici güçleri dış veriyle ölçülemez.
+
+## Üretim kapısı
+
+1. `feed_candidates` gerçek trafikle dolar.
+2. `export_training_data.sql` ile zaman ayrımlı eğitim seti çıkarılır.
+3. `train_ranker.py` modeli üretir, `offline_evaluate.py` taban modellerle
+   karşılaştırır.
+4. Kabul kriterleri sağlanmazsa model yayınlanmaz.
+5. Sağlanırsa AI Faz 6: gölge mod, sonra küçük yüzdeyle A/B.

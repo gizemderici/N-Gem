@@ -146,3 +146,30 @@ model (AI Faz 5) olasılık verdiğinde eklenecek.
 Çıktı `model_version`, `feature_version` ve girdi dosyasının SHA-256 özetini
 taşır. Aynı veri ve aynı sürüm aynı sonucu üretmek zorunda; bunu
 `test_offline_evaluate.py` doğruluyor.
+
+## Eğitilmiş model (AI Faz 5)
+
+Eğitim hattı hazır; üretime aday model **yok**.
+
+```bash
+# 1. Soy kütüğünden zaman ayrımlı eğitim seti
+psql "$DATABASE_URL" --csv -v ON_ERROR_STOP=1 -f export_training_data.sql > training.csv
+
+# 2. Model
+python train_ranker.py training.csv --output models/nexi-lr-v1.json
+
+# 3. Taban modellerle karşılaştırma
+python offline_evaluate.py output/events.csv --k 10 --output output/metrics.json
+```
+
+İlk model lojistik regresyon: açıklanabilir, geri alınabilir ve bağımlılıksız.
+Ağaç tabanlı modeller, doğrusal taban gerçek veriyle kıyaslandıktan sonra
+anlamlı olur. Ayrıntı ve sınırlar [MODEL_CARD.md](MODEL_CARD.md) dosyasında.
+
+**Bu fazın kabul kriterleri karşılanamadı.** "Zaman bazlı ayrılmış birinci
+taraf veride mevcut heuristik modeli geçmeli" ölçümü üretim ve kullanıcı
+olmadan yapılamaz; `feed_candidates` bugün boş. Ölçülebilen tek şey hattın
+kendisi: öğreniyor mu, tekrar üretilebilir mi, model dosyası bir tahmini
+kaynağına bağlamaya yetiyor mu, özellik vektörü geleceğe bakıyor mu. Sentetik
+veriyle eğitilmiş ağırlıklar depoya konmadı — sonradan gerçek sanılma riski
+taşırlar.
