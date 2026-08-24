@@ -52,6 +52,7 @@ class FeedPolicy(
     private val lineage: FeedLineageRepository = NoopFeedLineageRepository,
     private val consents: ConsentRepository = AlwaysGrantedConsentRepository,
     private val experiments: FeedExperiments = FeedExperiments(FeedExperimentConfig()),
+    private val fallbacks: FeedFallbackRecorder = FeedFallbackRecorder.NOOP,
 ) {
     private val logger = LoggerFactory.getLogger(FeedPolicy::class.java)
     private val mediaUrlExpiry: Duration = Duration.ofMinutes(15)
@@ -71,11 +72,17 @@ class FeedPolicy(
         // dese bile profil okunmaz. Deney kolu CONTROL ise ve öldürme anahtarı
         // kapalıysa da buraya düşülür.
         val variant = experiments.variantFor(viewerId)
-        if (!personalizationEnabled ||
-            !recommendations.personalizationAvailable ||
-            variant == FeedVariant.CONTROL ||
-            !consents.find(viewerId).granted
-        ) {
+        val skipReason = when {
+            !personalizationEnabled || !recommendations.personalizationAvailable ||
+                variant == FeedVariant.CONTROL -> FallbackReason.EXPERIMENT_DISABLED
+            !consents.find(viewerId).granted -> FallbackReason.CONSENT_MISSING
+            else -> null
+        }
+        if (skipReason != null) {
+            // İstemcinin `personalized=false` demesi bir arıza değil; yalnızca
+            // beklenmedik sebepler kaydediliyor ki alarm oranı gürültüye
+            // boğulmasın.
+            if (personalizationEnabled) recordFallback(viewerId, skipReason, variant, null)
             return chronological(viewerId, cursor as? Chronological, limit)
         }
         if (cursor is Chronological) {
@@ -93,7 +100,37 @@ class FeedPolicy(
             throw error
         } catch (error: Throwable) {
             logger.error("Personalized feed failed, falling back to chronological", error)
+            recordFallback(
+                viewerId,
+                FallbackReason.RANKING_ERROR,
+                variant,
+                "${error::class.simpleName}: ${error.message}",
+            )
             chronological(viewerId, null, limit)
+        }
+    }
+
+    private fun recordFallback(
+        viewerId: UUID,
+        reason: FallbackReason,
+        variant: FeedVariant,
+        detail: String?,
+    ) {
+        runCatching {
+            fallbacks.record(
+                FeedFallback(
+                    userId = viewerId,
+                    occurredAt = clock.instant(),
+                    reason = reason,
+                    modelVersion = ranker.modelVersion,
+                    experimentVariant = variant.wireName,
+                    detail = detail,
+                )
+            )
+        }.onFailure {
+            // Kaydın kendisi patlarsa akışı düşürmenin anlamı yok; zaten
+            // yedek yoldayız.
+            logger.warn("Could not record feed fallback: reason={}", reason, it)
         }
     }
 
@@ -115,8 +152,12 @@ class FeedPolicy(
             sessionId = UUID.randomUUID(),
         )
 
+        val startedAt = System.nanoTime()
         val pool = gather(viewerId, rankedAt)
-        if (pool.isEmpty()) return FeedResponse(emptyList(), null, modelVersion = ranker.modelVersion)
+        if (pool.isEmpty()) {
+            recordFallback(viewerId, FallbackReason.NO_CANDIDATES, variant, null)
+            return FeedResponse(emptyList(), null, modelVersion = ranker.modelVersion)
+        }
 
         // Aday sorguları medya ve konuları getirmiyor. Sıralayıcı konu
         // yakınlığını `details.topics` üzerinden okuduğu için hidrasyon
@@ -136,9 +177,10 @@ class FeedPolicy(
 
         val requestId = UUID.randomUUID()
         recordServed(viewerId, requestId, context, page, sourceByPost, offset, now)
+        val durationMillis = ((System.nanoTime() - startedAt) / 1_000_000).toInt()
         recordLineage(
             viewerId, requestId, context, ranked, page, sourceByPost, offset, rankedAt, result,
-            variant = variant, shadowOf = null,
+            variant = variant, shadowOf = null, durationMillis = durationMillis,
         )
         recordShadow(viewerId, requestId, context, hydrated, sourceByPost, rankedAt, signals)
 
@@ -208,6 +250,7 @@ class FeedPolicy(
         result: com.nexi.recommendations.RankingResult,
         variant: FeedVariant,
         shadowOf: UUID?,
+        durationMillis: Int? = null,
     ) {
         val servedPositions = page.withIndex().associate { (index, item) ->
             item.details.post.id to (offset + index)
@@ -226,6 +269,7 @@ class FeedPolicy(
                     localHour = context.localHour,
                     timezoneOffsetMinutes = context.timezoneOffsetMinutes,
                     personalized = true,
+                    durationMillis = durationMillis,
                     shadowOf = shadowOf,
                     candidates = ranked.map { item ->
                         val post = item.details.post

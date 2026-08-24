@@ -62,3 +62,9 @@ jobs:
       # bırakır ve bunu fark etmenin başka yolu yok.
       - name: Run recommender-lab tests
         run: python -m unittest discover -s tests -v
+
+      # Kayitli model dosyalari duruyor ve ozetleri tutuyor mu. Bozulmus bir
+      # model uretimde sessizce baska bir siralama uretir; bu adim alarm
+      # kaynagi. Kayit defteri bos oldugunda da basariyla gecer.
+      - name: Verify the model registry
+        run: python registry.py verify

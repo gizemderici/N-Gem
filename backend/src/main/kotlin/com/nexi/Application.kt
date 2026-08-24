@@ -16,6 +16,7 @@ import com.nexi.config.AppConfig
 import com.nexi.config.DatabaseFactory
 import com.nexi.feed.FeedExperiments
 import com.nexi.feed.FeedPolicy
+import com.nexi.feed.JdbcFeedFallbackRecorder
 import com.nexi.feed.JdbcFeedLineageRepository
 import com.nexi.feed.feedRoutes
 import com.nexi.media.JdbcMediaRepository
@@ -110,6 +111,7 @@ fun Application.module() {
     val topicResolver = TopicResolver(topicRepository)
     val consentRepository = JdbcConsentRepository(dataSource)
     val feedLineageRepository = JdbcFeedLineageRepository(dataSource)
+    val feedFallbackRecorder = JdbcFeedFallbackRecorder(dataSource)
 
     // Bildirim üreten servislerden önce kurulmalı; hepsi bunu alıyor.
     val notificationRepository = JdbcNotificationRepository(dataSource)
@@ -157,6 +159,7 @@ fun Application.module() {
         lineage = feedLineageRepository,
         consents = consentRepository,
         experiments = FeedExperiments(config.feedExperiment),
+        fallbacks = feedFallbackRecorder,
     )
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
 

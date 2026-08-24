@@ -52,7 +52,7 @@ Bu testler normal birim testlerinden ayrı tutulur:
 .\gradlew.bat integrationTest --no-daemon
 ```
 
-`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V18`
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V19`
 migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
 konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
 senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her

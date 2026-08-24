@@ -173,3 +173,70 @@ kendisi: öğreniyor mu, tekrar üretilebilir mi, model dosyası bir tahmini
 kaynağına bağlamaya yetiyor mu, özellik vektörü geleceğe bakıyor mu. Sentetik
 veriyle eğitilmiş ağırlıklar depoya konmadı — sonradan gerçek sanılma riski
 taşırlar.
+
+## Model operasyonları (AI Faz 8)
+
+### Kayıt defteri ve terfi kapısı
+
+Bir modelin üretime çıkması dosya kopyalamak değil. `registry.py` her sürümün
+SHA-256 özetini, eğitildiği veriyi, çevrimdışı metriklerini ve aşamasını tutar.
+
+```bash
+python registry.py register models/nexi-lr-v1.json --metrics output/metrics.json
+python registry.py promote nexi-lr-v1 --to shadow
+python registry.py promote nexi-lr-v1 --to production
+python registry.py list
+python registry.py verify
+```
+
+Aşamalar tek yönlü: `candidate → shadow → production`, geri dönüş
+`archived`'a. Eski model dosyası silinmiyor; geri alma onunla yapılıyor.
+
+**Üretim kapıları.** `--to production` şu koşullar sağlanmadan reddediliyor:
+
+| Kapı | Neden |
+|---|---|
+| Gölge modda doğrulanmış olmalı | Kabul kriteri: gölge testinden geçmeden üretime çıkamaz |
+| Çevrimdışı değerlendirme sonucu bulunmalı | Ölçülmemiş modelin iyi olduğu iddia edilemez |
+| Kronolojik tabanı geçmeli | Geçmiyorsa ortada model değil, gürültü var |
+| Olumsuz geri bildirim kontrolün iki katını aşmamalı | İsabet artarken güvenlik bozuluyorsa kapı kapalı |
+| Yeni üretici payı kronolojiğin yarısının altına düşmemeli | Sistem yalnızca zaten görünür olanı güçlendirmemeli |
+
+`verify` dosyaların durduğunu ve özetlerin tuttuğunu kontrol edip sıfırdan
+farklı çıkış kodu döner; CI'da alarm kaynağı. Elle değiştirilmiş bir model
+dosyası üretimde sessizce başka bir sıralama üretirdi.
+
+### Kayma tespiti
+
+```bash
+python drift.py onceki_egitim.csv yeni_veri.csv
+```
+
+Model bozulmasının en sessiz biçimi: kod değişmez, veri değişir. Ölçüm
+**Population Stability Index**; PSI > 0,25 olan bir özellik "yeniden eğit"
+demek ve komut sıfırdan farklı çıkış kodu verir.
+
+Kovalar yüzdelik sınırlarla kuruluyor, eşit genişlikle değil: beğeni sayısı ve
+yakınlık gibi çarpık dağılan özelliklerde eşit genişlik neredeyse her şeyi tek
+kovaya doldururdu.
+
+### Otomatik hat
+
+```bash
+DATABASE_URL=postgres://... ./run_pipeline.sh
+```
+
+Dışa aktar → eğit → değerlendir → kayma → kaydet. Terfi bilerek hattın dışında:
+üretime çıkış kapı kontrolü gerektiriyor ve otomatik yapılmamalı. Eğitim verisi
+`MIN_TRAINING_ROWS` (varsayılan 1000) altındaysa hat duruyor — az veriyle
+eğitilmiş model gürültü öğrenir.
+
+### Sağlık panosu
+
+```bash
+psql "$DATABASE_URL" -v hours=24 -f model_health.sql
+```
+
+Sürüm başına p50/p95 gecikme, aday ve dönen sayıları; yedeğe düşme oranı
+sebebe göre; saatlik hata eğrisi. `RANKING_ERROR` sıfırdan farklıysa alarm,
+diğer sebepler beklenen durumlar.
