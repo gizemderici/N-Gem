@@ -59,6 +59,10 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    // Sıralama eşitlik dosyasını yeniden üretmek için:
+    //   gradle test --tests '*RankingParityTest*' -Dnexi.parity.write=true
+    // Gradle bu bayrağı kendiliğinden test JVM'ine geçirmiyor.
+    System.getProperty("nexi.parity.write")?.let { systemProperty("nexi.parity.write", it) }
 }
 
 tasks.register<Test>("integrationTest") {

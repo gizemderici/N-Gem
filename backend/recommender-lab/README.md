@@ -10,6 +10,7 @@ Bu klasör, üretimdeki `nexi-contextual-v1` sıralayıcısının çevrimdışı
 - izleme süresi ile tamamlama oranını tek başına değil diğer sinyallerle birlikte değerlendirir;
 - sabah, mesai, akşam ve gece tercihlerini ayrı ağırlıklandırır;
 - yenilik, topluluk ilgisi, keşif ve üretici çeşitliliğini dengeler;
+
 - her öneri için kullanıcıya gösterilebilen kısa bir gerekçe üretir.
 
 Ham ekran koordinatı, tuş vuruşu, rehber, özel mesaj, kesin konum veya uygulama dışı izleme bu sözleşmede yoktur. Mobil istemciler yalnızca anlamlı ürün olaylarını gönderir. Üretimde saklama süresi, veri dışa aktarma/silme ve açık rıza metinleri ayrıca uygulanmalıdır.
@@ -77,3 +78,71 @@ Komut satırı varsayılan olarak kullanıcı kimliğinin kararlı özetiyle se�
 3. Mevcut kronolojik akışa karşı gölge modda skorlar karşılaştırılır.
 4. Küçük bir yüzdeyle A/B testi yapılır; olumsuz geri bildirim ve çeşitlilik koruma sınırları aşılırsa model otomatik kapatılır.
 5. Yeni model sürümü ancak metrik, veri sürümü, lisans ve model kartı kaydedildikten sonra yayınlanır.
+
+## Kotlin–Python eşitliği
+
+`nexi_ranker.py`, backend'deki `ContextualRanker` ile **birebir aynı**
+aritmetiği yürütür. Eskiden değerlendirici kendi basitleştirilmiş puanlamasını
+kullanıyordu; güncellik bileşeni yoktu, kalite başka bir bölenle
+hesaplanıyordu, keşif gürültüsü SHA-256 ile üretiliyordu ve çeşitlendirme hiç
+uygulanmıyordu. Bu hâliyle çevrimdışı değerlendirme üretimdeki modeli değil,
+ona benzeyen başka bir modeli ölçüyordu.
+
+Türkçe kelime ayrıştırması bilerek Python'da yok: özellik çıkarımı Kotlin'de
+kalıyor ve `fixtures/ranking_parity.json` dosyasına yazılıyor. İkinci bir
+tokenizer kopyası bakımı imkânsız hâle getirirdi.
+
+Dosyayı backend üretir:
+
+```bash
+gradle test --tests '*RankingParityTest*' -Dnexi.parity.write=true
+```
+
+Python tarafı aynı dosyadan aynı sıralamayı ve puanları (1e-12 toleransla)
+üretmek zorunda:
+
+```bash
+python -m unittest discover -s tests
+```
+
+İki taraf ayrıştığı anda hem Kotlin hem Python testi kırılır. GitHub Actions
+ikisini de her `Backend` gönderiminde çalıştırıyor.
+
+## Karşılaştırılan politikalar
+
+| Politika | Ne yapar |
+|---|---|
+| `chronological` | En yeni önce; kişiselleştirmenin aşması gereken alt sınır |
+| `popularity` | En çok etkileşim alan önce |
+| `interest_only` | Yalnızca kişiselleştirme bileşeni — güncellik, kalite ve keşif yok |
+| `contextual` | Üretimdeki `nexi-contextual-v1` |
+| `random` | Kararlı rastgele sıra; metriklerin taban gürültüsü |
+
+`interest_only` ayrı duruyor çünkü bağlamsal modelin kazandığı farkın gerçekten
+ilgi eşleşmesinden mi yoksa tazelik ve popülerlikten mi geldiğini ancak o
+ayırıyor.
+
+## Metrikler
+
+İsabet metrikleri (`hit_rate`, `mrr`, `ndcg`) tek başına yanıltıcı: yalnızca
+popüler içeriği döndüren bir politika isabette iyi görünüp katalogun küçük bir
+bölümünü gösterir, yeni üreticiyi hiç göstermez. Bu yüzden her koşuda birlikte
+raporlanıyor:
+
+| Metrik | Ne söyler |
+|---|---|
+| `coverage@k` | Katalogun ne kadarı gösteriliyor |
+| `creator_diversity@k` | Bir sayfadaki farklı üretici oranı |
+| `topic_diversity@k` | Bir sayfadaki farklı konu oranı |
+| `new_creator_share@k` | Az görünen üreticilere ayrılan gösterim payı |
+| `negative_feedback_rate@k` | Kullanıcının gizlediği/şikâyet ettiği içeriğin tekrar gösterilme oranı |
+
+**Kalibrasyon bilerek yok.** `nexi-contextual-v1` olasılık değil sıralama puanı
+üretiyor; puanı olasılık gibi raporlamak uydurma bir sayı olurdu. İlk eğitilmiş
+model (AI Faz 5) olasılık verdiğinde eklenecek.
+
+## Tekrar üretilebilirlik
+
+Çıktı `model_version`, `feature_version` ve girdi dosyasının SHA-256 özetini
+taşır. Aynı veri ve aynı sürüm aynı sonucu üretmek zorunda; bunu
+`test_offline_evaluate.py` doğruluyor.

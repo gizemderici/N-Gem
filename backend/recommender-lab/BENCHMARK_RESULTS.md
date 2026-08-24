@@ -1,5 +1,20 @@
 # KuaiRand-Pure doğrulama sonucu
 
+> **Bu sayılar geçersiz — AI Faz 4'te yeniden koşulmalı.**
+>
+> Aşağıdaki tablo, değerlendiricinin `nexi-contextual-v1`'i kendi
+> basitleştirilmiş kopyasıyla ölçtüğü dönemde üretildi: güncellik bileşeni hiç
+> hesaplanmıyor, kalite başka bir bölenle alınıyor, keşif gürültüsü SHA-256 ile
+> üretiliyor ve çeşitlendirme uygulanmıyordu. Yani ölçülen şey üretimdeki model
+> değil, ona benzeyen başka bir modeldi.
+>
+> Değerlendirici artık backend ile eşitliği test edilen [`nexi_ranker`](nexi_ranker.py)
+> üzerinden çalışıyor ve kronolojik ile yalnızca-ilgi tabanlarını da
+> raporluyor. Yeni sayılar için KuaiRand-Pure arşivi indirilip
+> `offline_evaluate.py` yeniden koşulmalı; ham veri depoda tutulmuyor.
+>
+> Tarihsel kayıt olarak bırakıldı, karar dayanağı olarak kullanılmamalı.
+
 Koşu tarihi: 23 Ağustos 2026. Resmî Zenodo arşivinin gözlenen MD5 özeti `0820331067a3784d9691136f772b35a7`; yayıncının verdiği özetle aynıdır. Tam makine-okunur sonuç [benchmarks/kuairand_pure_2026-08-23.json](benchmarks/kuairand_pure_2026-08-23.json) dosyasındadır.
 
 | Politika / model | HitRate@10 | MRR@10 | NDCG@10 | Coverage@10 |

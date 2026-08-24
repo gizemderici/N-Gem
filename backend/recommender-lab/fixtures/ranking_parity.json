@@ -1,0 +1,173 @@
+{
+    "modelVersion": "nexi-contextual-v1",
+    "featureVersion": "nexi-features-v2",
+    "viewerId": "11111111-2222-4333-8444-555555555555",
+    "rankedAtEpochSecond": 1787518800,
+    "localHour": 21,
+    "signals": [
+        {
+            "eventType": "INTEREST_SELECTED",
+            "features": [
+                "topic:teknoloji"
+            ],
+            "localHour": 21,
+            "occurredAtEpochSecond": 1787515200,
+            "dwellMillis": null,
+            "completionRatio": null
+        },
+        {
+            "eventType": "CONTENT_VIEW",
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000a",
+                "media:text",
+                "topic:teknoloji",
+                "token:önceki",
+                "token:teknoloji",
+                "token:yazısı"
+            ],
+            "localHour": 21,
+            "occurredAtEpochSecond": 1787432400,
+            "dwellMillis": 21000,
+            "completionRatio": 0.65
+        },
+        {
+            "eventType": "CONTENT_LIKED",
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000b",
+                "media:video",
+                "topic:oyun",
+                "token:video",
+                "token:içerik"
+            ],
+            "localHour": 10,
+            "occurredAtEpochSecond": 1787086800,
+            "dwellMillis": null,
+            "completionRatio": null
+        },
+        {
+            "eventType": "CONTENT_HIDDEN",
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000b",
+                "media:text",
+                "topic:seyahat",
+                "token:beğenilmeyen",
+                "token:gönderi"
+            ],
+            "localHour": 21,
+            "occurredAtEpochSecond": 1787346000,
+            "dwellMillis": null,
+            "completionRatio": null
+        }
+    ],
+    "candidates": [
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000001",
+            "ownerId": "dddddddd-0000-4000-8000-00000000000a",
+            "createdAtEpochSecond": 1787517000,
+            "likeCount": 12,
+            "saveCount": 3,
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000a",
+                "media:text",
+                "topic:teknoloji",
+                "token:kotlin",
+                "token:yazılım",
+                "token:geliştirme",
+                "token:üzerine",
+                "token:uzun",
+                "token:yazı"
+            ]
+        },
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000002",
+            "ownerId": "dddddddd-0000-4000-8000-00000000000a",
+            "createdAtEpochSecond": 1787513400,
+            "likeCount": 0,
+            "saveCount": 0,
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000a",
+                "media:text",
+                "topic:teknoloji",
+                "token:aynı",
+                "token:yazardan",
+                "token:ikinci",
+                "token:teknoloji",
+                "token:yazısı"
+            ]
+        },
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000003",
+            "ownerId": "dddddddd-0000-4000-8000-00000000000b",
+            "createdAtEpochSecond": 1787504400,
+            "likeCount": 5,
+            "saveCount": 1,
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000b",
+                "media:video",
+                "topic:oyun",
+                "token:akşam",
+                "token:konsol",
+                "token:başında",
+                "token:uzun",
+                "token:oyun",
+                "token:seansı"
+            ]
+        },
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000004",
+            "ownerId": "dddddddd-0000-4000-8000-00000000000b",
+            "createdAtEpochSecond": 1787346000,
+            "likeCount": 1,
+            "saveCount": 0,
+            "features": [
+                "creator:dddddddd-0000-4000-8000-00000000000b",
+                "media:text",
+                "token:sahilde",
+                "token:yürüyüş",
+                "token:kahve"
+            ]
+        }
+    ],
+    "expected": [
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000002",
+            "position": 0,
+            "rawScore": 0.5248226230983485,
+            "finalScore": 2.194251088740904
+        },
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000001",
+            "position": 1,
+            "rawScore": 0.23565261320185274,
+            "finalScore": 1.6812698980018757
+        },
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000003",
+            "position": 2,
+            "rawScore": -0.02284812715209909,
+            "finalScore": 0.9783757628311771
+        },
+        {
+            "postId": "aaaaaaaa-0000-4000-8000-000000000004",
+            "position": 3,
+            "rawScore": -0.38344711979012,
+            "finalScore": -0.2853919082222543
+        }
+    ],
+    "affinities": {
+        "creator:dddddddd-0000-4000-8000-00000000000a": 0.389,
+        "creator:dddddddd-0000-4000-8000-00000000000b": -0.505,
+        "media:text": -0.352,
+        "media:video": 0.218,
+        "token:beğenilmeyen": -0.652,
+        "token:gönderi": -0.652,
+        "token:içerik": 0.218,
+        "token:teknoloji": 0.389,
+        "token:video": 0.218,
+        "token:yazısı": 0.389,
+        "token:önceki": 0.389,
+        "topic:oyun": 0.218,
+        "topic:seyahat": -0.652,
+        "topic:teknoloji": 0.67
+    }
+}

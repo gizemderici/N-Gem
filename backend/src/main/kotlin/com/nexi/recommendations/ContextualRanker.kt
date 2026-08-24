@@ -164,6 +164,18 @@ class ContextualRanker {
     private data class Affinity(val score: Double, val evidence: Double)
 }
 
+/**
+ * Bir gönderiden çıkarılan özellik anahtarları.
+ *
+ * Eşitlik testi bunları referans dosyasına yazıyor: Türkçe kelime ayrıştırması
+ * Kotlin'de kalıyor, Python tarafı aynı özelliklerden aynı aritmetiği
+ * yürütmekle yükümlü.
+ */
+internal fun contentFeatureKeys(details: PostDetails): Set<String> = ContentFeatures.from(details).keys
+
+/** Bir sinyalden çıkarılan özellik anahtarları; bkz. [contentFeatureKeys]. */
+internal fun signalFeatureKeys(signal: RecommendationSignal): Set<String> = SignalFeatures.from(signal).keys
+
 private data class ContentFeatures(val keys: Set<String>) {
     companion object {
         fun from(details: PostDetails): ContentFeatures {

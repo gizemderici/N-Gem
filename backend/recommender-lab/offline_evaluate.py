@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Time-aware offline evaluation for the NSosyal contextual ranker.
+"""NSosyal sıralayıcısı için zaman bazlı çevrimdışı değerlendirme.
 
-The script intentionally uses only Python's standard library. It expects the
-normalized event contract documented in recommender-lab/README.md and keeps the
-last positive interaction of every eligible user as the test target.
+Yalnızca standart kütüphane kullanır. Puanlama [`nexi_ranker`][nexi_ranker]
+üzerinden yapılır; o modülün backend'deki `ContextualRanker` ile eşitliğini
+`tests/test_ranking_parity.py` doğrular. Değerlendirici kendi basitleştirilmiş
+kopyasını kullandığı sürece ölçtüğü şey üretimdeki model değildi.
+
+Zaman bazlı ayrım: her uygun kullanıcının **son** olumlu etkileşimi test
+hedefi, ondan önceki her şey geçmiş. Aday havuzu ve etkileşim sayaçları da
+yalnızca hedef anına kadar olan olaylardan üretilir.
 """
 
 from __future__ import annotations
@@ -12,12 +17,20 @@ import argparse
 import csv
 import hashlib
 import json
-import math
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from metrics import MetricAccumulator  # noqa: E402
+from nexi_ranker import Candidate, Signal, deterministic_exploration, reward  # noqa: E402
+from policies import POLICIES, as_uuid  # noqa: E402
+
+MODEL_VERSION = "nexi-contextual-v1"
+FEATURE_VERSION = "nexi-features-v2"
 
 
 @dataclass(frozen=True)
@@ -39,7 +52,7 @@ class Event:
         explicit_topic = self.target_feature.lower().removeprefix("topic:").strip()
         values = [f"topic:{explicit_topic}"] if explicit_topic else [f"topic:{topic}" for topic in self.topics]
         if self.creator_id:
-            values.append(f"creator:{self.creator_id}")
+            values.append(f"creator:{as_uuid(self.creator_id)}")
         if self.media_type:
             values.append(f"media:{self.media_type}")
         return tuple(values)
@@ -98,78 +111,75 @@ def load_events(path: Path) -> list[Event]:
     return sorted(events, key=lambda event: (event.timestamp, event.user_id, event.item_id))
 
 
-def reward(event: Event) -> float:
-    if event.event_type in {"session_started", "content_impression"}:
-        return 0.0
-    if event.event_type == "interest_selected":
-        return 2.8
-    if event.event_type == "content_view":
-        dwell = min(event.dwell_ms, 60_000) / 60_000.0 * 1.1
-        return 0.15 + dwell + event.completion_ratio * 1.2
-    return {
-        "content_complete": 2.0,
-        "content_liked": 2.2,
-        "content_saved": 3.0,
-        "content_shared": 3.2,
-        "recommendation_reason_opened": 0.35,
-        "content_hidden": -4.0,
-        "content_reported": -6.0,
-    }.get(event.event_type, 0.0)
+def to_signal(event: Event) -> Signal:
+    return Signal(
+        event_type=event.event_type.upper(),
+        features=event.features,
+        local_hour=event.local_hour,
+        occurred_at=int(event.timestamp),
+        dwell_millis=event.dwell_ms,
+        completion_ratio=event.completion_ratio,
+    )
 
 
-def time_period(hour: int) -> str:
-    if 6 <= hour <= 8:
-        return "morning"
-    if 9 <= hour <= 17:
-        return "work_hours"
-    if 18 <= hour <= 21:
-        return "evening"
-    return "night"
+def reward_of(event: Event) -> float:
+    return reward(to_signal(event))
 
 
-def build_affinities(history: Iterable[Event], target: Event) -> dict[str, float]:
-    weighted_reward: Counter[str] = Counter()
-    evidence: Counter[str] = Counter()
-    target_period = time_period(target.local_hour)
-    for event in history:
-        value = reward(event)
-        if value == 0.0:
-            continue
-        age_days = max(0.0, target.timestamp - event.timestamp) / 86_400.0
-        recency = math.exp(-age_days / 30.0)
-        context = 1.0 if time_period(event.local_hour) == target_period else 0.30
-        weight = recency * context
-        for feature in event.features:
-            weighted_reward[feature] += value * weight
-            evidence[feature] += abs(value) * weight
-    return {key: value / (2.0 + evidence[key]) for key, value in weighted_reward.items()}
+def dataset_checksum(path: Path) -> str:
+    """Girdi dosyasının SHA-256 özeti.
+
+    "Aynı veri ve aynı model sürümü aynı sonucu üretmeli" ancak sonucun hangi
+    dosyadan geldiği kayıtlıysa doğrulanabilir.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def stable_noise(user_id: str, item_id: str, salt: str = "") -> float:
-    digest = hashlib.sha256(f"{salt}:{user_id}:{item_id}".encode()).digest()
-    return int.from_bytes(digest[:4], "big") / 2**32
+@dataclass(frozen=True)
+class Example:
+    """Tek değerlendirme örneği: bir kullanıcının son olumlu etkileşimi."""
+
+    viewer_id: str
+    target_item: str
+    local_hour: int
+    now: int
+    signals: tuple[Signal, ...]
+    candidates: tuple[Candidate, ...]
+    disliked: frozenset[str]
 
 
-def evaluate(
+def build_examples(
     events: list[Event],
-    k: int = 10,
-    max_candidates: int = 500,
-    max_users: int | None = None,
-) -> dict[str, float | int]:
+    max_candidates: int,
+    max_users: int | None,
+) -> tuple[list[Example], set[str], int]:
     by_user: dict[str, list[Event]] = defaultdict(list)
     item_features: dict[str, tuple[str, ...]] = {}
+    item_creator: dict[str, str] = {}
     item_first_seen: dict[str, float] = {}
+    appearance: Counter[str] = Counter()
+
     for event in events:
         by_user[event.user_id].append(event)
         if event.item_id and event.features:
             item_features[event.item_id] = event.features
+        if event.item_id and event.creator_id:
+            item_creator[event.item_id] = event.creator_id
         if event.item_id:
-            item_first_seen[event.item_id] = min(item_first_seen.get(event.item_id, event.timestamp), event.timestamp)
+            item_first_seen[event.item_id] = min(
+                item_first_seen.get(event.item_id, event.timestamp), event.timestamp
+            )
+        if event.creator_id:
+            appearance[event.creator_id] += 1
 
     targets: list[Event] = []
     histories: dict[str, list[Event]] = {}
     for user_id, history in by_user.items():
-        positives = [event for event in history if event.item_id and reward(event) >= 0.30]
+        positives = [event for event in history if event.item_id and reward_of(event) >= 0.30]
         if len(positives) < 2:
             continue
         target = positives[-1]
@@ -180,100 +190,134 @@ def evaluate(
         histories[user_id] = before
 
     if max_users is not None and len(targets) > max_users:
-        targets = sorted(targets, key=lambda event: stable_noise(event.user_id, "evaluation-user", "user-sample"))[:max_users]
+        targets = sorted(
+            targets,
+            key=lambda event: deterministic_exploration(
+                as_uuid(event.user_id), as_uuid("user-sample"), 0
+            ),
+        )[:max_users]
     targets.sort(key=lambda event: event.timestamp)
 
-    ranks: list[int] = []
-    popularity_ranks: list[int] = []
-    random_ranks: list[int] = []
-    recommended_items: set[str] = set()
-    popularity_recommended: set[str] = set()
-    random_recommended: set[str] = set()
-    popularity: Counter[str] = Counter()
-    popularity_cursor = 0
+    examples: list[Example] = []
+    engagement: Counter[str] = Counter()
+    cursor = 0
     for target in targets:
-        while popularity_cursor < len(events) and events[popularity_cursor].timestamp < target.timestamp:
-            event = events[popularity_cursor]
-            if reward(event) > 0 and event.item_id:
-                popularity[event.item_id] += 1
-            popularity_cursor += 1
+        while cursor < len(events) and events[cursor].timestamp < target.timestamp:
+            event = events[cursor]
+            if reward_of(event) > 0 and event.item_id:
+                engagement[event.item_id] += 1
+            cursor += 1
+
         history = histories[target.user_id]
         seen = {event.item_id for event in history if event.item_id}
+        disliked = {
+            event.item_id for event in history
+            if event.item_id and event.event_type in {"content_hidden", "content_reported"}
+        }
         catalog = [
             item_id for item_id, first_seen in item_first_seen.items()
             if first_seen <= target.timestamp and (item_id not in seen or item_id == target.item_id)
         ]
         if target.item_id not in catalog:
             continue
+
+        viewer_uuid = as_uuid(target.user_id)
         negatives = sorted(
             (item for item in catalog if item != target.item_id),
-            key=lambda item: stable_noise(target.user_id, item, "candidate-sample"),
+            key=lambda item: deterministic_exploration(viewer_uuid, as_uuid(item), 1),
         )[: max(0, max_candidates - 1)]
-        candidates = negatives + [target.item_id]
-        affinities = build_affinities(history, target)
 
-        def item_score(item_id: str) -> float:
-            features = item_features.get(item_id, ())
-            personalized = sum(affinities.get(feature, 0.0) for feature in features)
-            personalized /= math.sqrt(max(1, len(features)))
-            quality = math.log1p(popularity[item_id]) / 10.0
-            return personalized * 2.4 + quality * 0.35 + stable_noise(target.user_id, item_id, "model-tie") * 0.01
-
-        ranking = sorted(candidates, key=item_score, reverse=True)
-        popularity_ranking = sorted(
-            candidates,
-            key=lambda item: (popularity[item], stable_noise(target.user_id, item, "popularity-tie")),
-            reverse=True,
+        candidates = tuple(
+            Candidate(
+                post_id=as_uuid(item_id),
+                owner_id=as_uuid(item_creator.get(item_id, item_id)),
+                created_at=int(item_first_seen[item_id]),
+                like_count=engagement[item_id],
+                save_count=0,
+                features=item_features.get(item_id, ()),
+            )
+            for item_id in negatives + [target.item_id]
         )
-        random_ranking = sorted(
-            candidates,
-            key=lambda item: stable_noise(target.user_id, item, "random-baseline"),
-            reverse=True,
-        )
-        rank = ranking.index(target.item_id) + 1
-        ranks.append(rank)
-        popularity_ranks.append(popularity_ranking.index(target.item_id) + 1)
-        random_ranks.append(random_ranking.index(target.item_id) + 1)
-        recommended_items.update(ranking[:k])
-        popularity_recommended.update(popularity_ranking[:k])
-        random_recommended.update(random_ranking[:k])
 
-    evaluated = len(ranks)
-    catalog_size = len(item_first_seen)
-    def metric_values(values: list[int], recommended: set[str], prefix: str = "") -> dict[str, float]:
-        matching = [rank for rank in values if rank <= k]
-        return {
-            f"{prefix}hit_rate@{k}": round(len(matching) / evaluated, 6) if evaluated else 0.0,
-            f"{prefix}mrr@{k}": round(sum(1.0 / rank for rank in matching) / evaluated, 6) if evaluated else 0.0,
-            f"{prefix}ndcg@{k}": round(sum(1.0 / math.log2(rank + 1) for rank in matching) / evaluated, 6) if evaluated else 0.0,
-            f"{prefix}coverage@{k}": round(len(recommended) / catalog_size, 6) if catalog_size else 0.0,
-        }
+        examples.append(
+            Example(
+                viewer_id=viewer_uuid,
+                target_item=as_uuid(target.item_id),
+                local_hour=target.local_hour,
+                now=int(target.timestamp),
+                signals=tuple(to_signal(event) for event in history),
+                candidates=candidates,
+                disliked=frozenset(as_uuid(item) for item in disliked),
+            )
+        )
+
+    # "Yeni üretici": gösterim sayısı medyanın altında kalanlar. Mutlak bir
+    # eşik veri setinden veri setine anlamını yitirirdi.
+    median = sorted(appearance.values())[len(appearance) // 2] if appearance else 0
+    new_creators = {as_uuid(creator) for creator, count in appearance.items() if count <= median}
+
+    return examples, new_creators, len(item_first_seen)
+
+
+def evaluate(
+    events: list[Event],
+    k: int = 10,
+    max_candidates: int = 500,
+    max_users: int | None = None,
+) -> dict[str, object]:
+    examples, new_creators, catalog_size = build_examples(events, max_candidates, max_users)
+
+    accumulators = {name: MetricAccumulator(k=k) for name in POLICIES}
+    for example in examples:
+        for name, policy in POLICIES.items():
+            ranking = policy(
+                example.viewer_id,
+                list(example.candidates),
+                list(example.signals),
+                example.local_hour,
+                example.now,
+            )
+            accumulators[name].observe(ranking, example.target_item, new_creators, example.disliked)
+
+    policies: dict[str, dict[str, float]] = {}
+    for name, accumulator in accumulators.items():
+        summary = accumulator.summary()
+        summary[f"coverage@{k}"] = accumulator.coverage(catalog_size)
+        policies[name] = summary
 
     return {
-        "evaluated_users": evaluated,
-        **metric_values(ranks, recommended_items),
-        **metric_values(popularity_ranks, popularity_recommended, "popularity_baseline_"),
-        **metric_values(random_ranks, random_recommended, "random_baseline_"),
+        "model_version": MODEL_VERSION,
+        "feature_version": FEATURE_VERSION,
+        "evaluated_examples": len(examples),
         "catalog_size": catalog_size,
+        "k": k,
+        "policies": policies,
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="NSosyal bağlamsal önerici çevrimdışı değerlendirmesi")
+    parser = argparse.ArgumentParser(description="NSosyal sıralayıcısı çevrimdışı değerlendirmesi")
     parser.add_argument("events", type=Path, help="Normalize edilmiş CSV olay dosyası")
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--max-candidates", type=int, default=500)
-    parser.add_argument("--max-users", type=int, default=1_000, help="Deterministik değerlendirme kullanıcı örneklemi; 0 tüm kullanıcılar")
+    parser.add_argument(
+        "--max-users",
+        type=int,
+        default=1_000,
+        help="Deterministik değerlendirme kullanıcı örneklemi; 0 tüm kullanıcılar",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.k < 1 or args.max_candidates < args.k:
         parser.error("k en az 1 olmalı ve max-candidates k'dan küçük olmamalı")
+
     metrics = evaluate(
         load_events(args.events),
         args.k,
         args.max_candidates,
         None if args.max_users == 0 else max(1, args.max_users),
     )
+    metrics["dataset"] = {"path": args.events.name, "sha256": dataset_checksum(args.events)}
     payload = json.dumps(metrics, ensure_ascii=False, indent=2)
     if args.output:
         args.output.write_text(payload + "\n", encoding="utf-8")
