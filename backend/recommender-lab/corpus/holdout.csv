@@ -1,0 +1,61 @@
+metin,duygu,konu
+"Telefonu bir haftadır kullanıyorum, kamera gece çekimlerinde beni şaşırttı.",olumlu,teknoloji
+"Güncellemeden sonra pil bir günü zor çıkarıyor, eskisi daha iyiydi.",olumsuz,teknoloji
+"Yeni dizüstü modeli önümüzdeki ay raflarda olacakmış.",notr,teknoloji
+"Kulaklık bağlantısı sürekli kopuyor, bu fiyata alınmaz.",olumsuz,teknoloji
+"Arayüz sadeleşmiş, uzun süredir bu kadar rahat kullanmamıştım.",olumlu,teknoloji
+"Model verdiğim metni özetlerken ana fikri hiç kaçırmadı, etkileyici.",olumlu,yapay-zeka
+"Sohbet botu her soruma aynı kalıp cevabı veriyor, faydası yok.",olumsuz,yapay-zeka
+"Çeviri motorunun yeni sürümü test aşamasında.",notr,yapay-zeka
+"Üretilen görsellerde eller hâlâ bozuk çıkıyor, hayal kırıklığı.",olumsuz,yapay-zeka
+"Asistan Türkçe telaffuzu bu sefer düzgün anladı.",olumlu,yapay-zeka
+"Sergideki ışık düzeni eserleri öldürmüş, hiçbir detay görünmüyor.",olumsuz,sanat
+"Tabloların yerleşimi gezerken insanı yormuyor, çok iyi düşünülmüş.",olumlu,sanat
+"Galeri önümüzdeki hafta yeni bir illüstrasyon seçkisi açıyor.",notr,sanat
+"Kapak için seçilen yazı tipi metinle hiç uyuşmamış.",olumsuz,sanat
+"Seramik atölyesinden çıkan işler beklediğimden çok daha güzeldi.",olumlu,sanat
+"Hoca konuyu anlatırken örnek vermiyor, takip etmek imkânsız.",olumsuz,egitim
+"Kursun içeriği güncellenmiş, alıştırmalar gerçekten öğretici.",olumlu,egitim
+"Ders programı yarın öğrenci sistemine yüklenecek.",notr,egitim
+"Ödevlerin teslim süresi çok kısa, kimse yetiştiremiyor.",olumsuz,egitim
+"Sınavda çıkan sorular tam da çalıştığımız yerlerdendi.",olumlu,egitim
+"Takım ikinci yarıda hiç pres yapmadı, izlemesi eziyetti.",olumsuz,spor
+"Kaleci son dakikada müthiş bir kurtarış yaptı.",olumlu,spor
+"Kupa maçının saati federasyon tarafından açıklandı.",notr,spor
+"Transfer edilen oyuncu üç maçtır topa bile dokunamıyor.",olumsuz,spor
+"Tribün atmosferi maçın son dakikalarında takımı taşıdı.",olumlu,spor
+"Belediye zam kararını açıkladı, ulaşım yine pahalandı.",olumsuz,gundem
+"Yeni düzenleme kavşaktaki trafiği gerçekten rahatlattı.",olumlu,gundem
+"İmar planına ilişkin görüşme yarın yapılacak.",notr,gundem
+"Hava kirliliği ölçümleri geçen yıla göre daha da kötü.",olumsuz,gundem
+"Afet tatbikatı mahallede düzgün organize edilmişti.",olumlu,gundem
+"Makalenin yöntem bölümü örneklem sayısını hiç açıklamamış.",olumsuz,bilim
+"Teleskoptan gelen ilk kareler beklentilerin ötesinde.",olumlu,bilim
+"Araştırma ekibi bulgularını gelecek ay yayımlayacak.",notr,bilim
+"Deney tekrarlandığında sonuç tutmadı, çalışma zayıf.",olumsuz,bilim
+"İklim verilerinin açık erişime çıkması çok değerli.",olumlu,bilim
+"Yeni bölümdeki bulmacalar dengeli, oynarken hiç sıkılmadım.",olumlu,oyun
+"Sunucular akşam saatlerinde sürekli düşüyor, oynanmıyor.",olumsuz,oyun
+"Yamanın çıkış tarihi stüdyo tarafından duyuruldu.",notr,oyun
+"Kontroller gecikmeli tepki veriyor, nişan almak işkence.",olumsuz,oyun
+"Hikâye anlatımı beni sonuna kadar ekrana bağladı.",olumlu,oyun
+"Albümün mikslemesi vokali tamamen boğmuş.",olumsuz,muzik
+"Konserde ses düzeni kusursuzdu, her enstrüman ayrı duyuluyordu.",olumlu,muzik
+"Grubun yeni teklisi cuma günü yayına giriyor.",notr,muzik
+"Şarkının sözleri çok basit kalmış, tekrardan ibaret.",olumsuz,muzik
+"Aranjmandaki yaylılar parçayı bambaşka bir yere taşımış.",olumlu,muzik
+"Randevu almak için haftalarca bekledim, sistem çalışmıyor.",olumsuz,saglik
+"Uyku düzenimi oturttuktan sonra gün boyu çok daha dinçim.",olumlu,saglik
+"Tahlil sonuçları yarın sabah sisteme düşecek.",notr,saglik
+"Fizik tedavi seansları ağrıyı hiç azaltmadı.",olumsuz,saglik
+"Diyetisyenin hazırladığı program bana gerçekten iyi geldi.",olumlu,saglik
+"Yatırımcı görüşmeleri olumlu geçti, ekip çok motive.",olumlu,girisimcilik
+"Fiyatlandırmayı üç kez değiştirdik, müşteri hâlâ anlamıyor.",olumsuz,girisimcilik
+"Hızlandırma programının başvuruları bu ay açılıyor.",notr,girisimcilik
+"Ekip içinde kimse kimseye bilgi aktarmıyor, iş ilerlemiyor.",olumsuz,girisimcilik
+"İlk sürümü çıkardıktan sonra gelen geri bildirim çok öğretici oldu.",olumlu,girisimcilik
+"Otel merkeze yürüme mesafesinde, konum olarak harikaydı.",olumlu,seyahat
+"Uçuş beş saat ertelendi, kimse bilgi vermedi.",olumsuz,seyahat
+"Vize başvuru randevuları önümüzdeki hafta açılacak.",notr,seyahat
+"Sahil sabah temizlenmiyor, denize girmek istemedik.",olumsuz,seyahat
+"Yerel mutfağı tatmak bu gezinin en güzel yanıydı.",olumlu,seyahat

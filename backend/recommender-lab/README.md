@@ -277,3 +277,46 @@ DATABASE_URL="postgres://nexi@localhost/nexi" \
 `psql` yerel kurulumda yoksa compose konteynerine yönlendirilebilir.
 `--model-version` her koşuya ayrı bir kayıt defteri anahtarı veriyor — sabit
 bırakılırsa her eğitim bir öncekinin kaydını eziyordu.
+
+## Türkçe duygu + konu taban modeli
+
+Bu laboratuvar ayrıca gönderi metnini üç duygu sınıfına ve ürünün 12 konu
+slug'ına ayıran açıklanabilir bir TF-IDF + lojistik regresyon tabanı içerir.
+Yalnızca Python standart kütüphanesini kullanır; model dosyası üretilen artefakt
+olduğu için `models/` altında kalır ve Git'e eklenmez.
+
+```bash
+python make_text_corpus.py --output corpus/train.csv --count 504
+python train_text_classifier.py corpus/train.csv \
+  --holdout corpus/holdout.csv \
+  --output models/nexi-text-v1.json
+
+python classify_text.py --model models/nexi-text-v1.json \
+  --probabilities "Yeni güncelleme gerçekten başarılı."
+
+python classify_text.py --model models/nexi-text-v1.json \
+  --evaluate corpus/blind_test_v1.csv
+```
+
+`--evaluate --json` accuracy, macro-F1 ve sınıf bazlı precision/recall/F1
+değerlerini makinece okunabilir biçimde yazar. Eğitim ve değerlendirme ayrı
+komutlardır; sınıflandırma aracı değerlendirme sırasında model dosyasını
+değiştirmez.
+
+### Kanıtın sınırı
+
+- `train.csv`: 504 kalıptan üretilmiş kurgu örnek; eğitim doğruluğu başarı
+  ölçüsü değildir.
+- `holdout.csv`: geliştirme sırasında görüldü ve ayar kararlarında kullanıldı;
+  final test değildir.
+- `test.csv`: ilk ölçümden sonra hataları görülerek eğitim konu sözlüğü
+  genişletildi; genişletme sonrası sonucu bağımsız değildir.
+- `blind_test_v1.csv`: 72 dengeli örnek, model çalıştırılmadan önce donduruldu;
+  tek-seferlik iç doğrulamadır fakat gerçek kullanıcı örneklemi değildir.
+
+Kör sette duygu accuracy/macro-F1 `0.542/0.520`, konu accuracy/macro-F1
+`0.319/0.303` çıktı. Bu nedenle model **ürün özelliği veya otomatik etiketleme
+servisi olarak etkinleştirilmez**. Şu anki görevi veri ve değerlendirme hattını
+kanıtlamak, gerçek çift-etiketli Türkçe veri toplandığında karşılaştırma tabanı
+olmaktır. Ayrıntı ve değişmez veri kökeni [TEXT_MODEL_CARD.md](TEXT_MODEL_CARD.md)
+ile [TEXT_MODEL_EVALUATION.md](TEXT_MODEL_EVALUATION.md) dosyalarındadır.

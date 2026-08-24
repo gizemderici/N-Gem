@@ -27,6 +27,25 @@ Dış veri yalnızca şema, benchmark ve soğuk başlangıç araştırmasında k
 
 Kamera, kesin konum, kişi listesi, özel mesaj içeriği ve ham dokunma koordinatı öneri eğitimi için toplanmaz. Kullanıcı profilini görebilmeli, dışa aktarabilmeli ve sıfırlayabilmelidir. Veri seti sürümü, kaynak, lisans, indirme tarihi ve dosya özeti (SHA-256) model kaydına eklenmelidir.
 
+## Yerel Türkçe metin corpus'u
+
+Türkçe duygu ve konu sınıflandırma hattını çalıştırmak için repoda küçük bir
+kurgu corpus bulunur. Bu corpus dışarıdan indirilmemiştir; gerçek kullanıcı
+içeriği ve kişisel veri içermez. Dolayısıyla bir ürün modeli eğitmek için değil,
+yalnızca kodun ve değerlendirme protokolünün smoke testi için kullanılır.
+
+| Dosya | Satır | Rol | SHA-256 | Kullanım durumu |
+|---|---:|---|---|---|
+| `corpus/train.csv` | 504 | Eğitim | `c9292c3ebccc14ffcbcade28dc793491bb1802c9b92b4584bff222690b7b6e0e` | Sentetik baseline |
+| `corpus/holdout.csv` | 60 | Geliştirme | `bcbc5a408faf565cbdb687a8bbba711e5fcfd9ec8d709ce91bbfd5de2c32b889` | Final test değildir |
+| `corpus/test.csv` | 36 | Eski test | `5088e98aa58dc9877f044c724f62782fc77591cb61e08cde1df7792dc3db8656` | Ayarlama bilgisi sızdığı için kirlenmiş |
+| `corpus/blind_test_v1.csv` | 72 | Tek-seferlik iç doğrulama | `2f9633bbd9d5c72d62d1360e50016882abbda9be33778c17b6c9af5ea5bdae0a` | Artık ayar için kullanılamaz |
+
+Kör iç testte duygu accuracy/macro-F1 `0.542/0.520`, konu
+accuracy/macro-F1 `0.319/0.303` çıkmıştır. Bu sonuç ürün kullanımı için
+yetersizdir. Tam karar ve protokol [TEXT_MODEL_CARD.md](TEXT_MODEL_CARD.md)
+ve [TEXT_MODEL_EVALUATION.md](TEXT_MODEL_EVALUATION.md) dosyalarındadır.
+
 ## Uyum notu
 
 Bu dosya hukuki görüş değildir. Özellikle CC BY-SA türetilmiş model/özellik artefaktlarının dağıtımı ile “research-only” veri setlerinin ticari kullanımı canlıya çıkmadan önce hukuk danışmanıyla onaylanmalıdır.
