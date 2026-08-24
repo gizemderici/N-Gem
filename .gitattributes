@@ -1,0 +1,29 @@
+# Satır sonları.
+#
+# `core.autocrlf=true` ayarlı bir Windows makinesinde taze klon bütün metin
+# dosyalarını CRLF'e çeviriyordu. İki yerde kırılıyor:
+#
+#   1. `RankingParityTest` referans dosyasını bayt bayt karşılaştırıyor;
+#      diskteki CRLF ile üretilen LF tutmuyor ve test yalnızca Windows'ta
+#      patlıyordu.
+#   2. CRLF'li bir `.sh` dosyası bash altında hiç çalışmıyor — `e2e-smoke.sh`
+#      ve `run_pipeline.sh` Docker içinde `bad interpreter` veriyordu.
+#
+# Depodaki her metin dosyası zaten LF olarak saklanıyor; buradaki kural
+# checkout'un da LF bırakmasını sağlıyor. İçerik değişmiyor.
+* text=auto eol=lf
+
+# Windows'ta çalıştırılan betikler CRLF olmak zorunda.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# İkili dosyalar hiç dokunulmasın.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp4 binary
+*.zip binary
+*.jar binary
+*.ico binary

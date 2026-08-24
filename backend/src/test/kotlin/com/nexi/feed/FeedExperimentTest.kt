@@ -15,7 +15,7 @@ class FeedExperimentTest {
         // kimliğin özetinden geldiği için oturum değiştirmek ya da uygulamayı
         // yeniden kurmak grubu kaydırmıyor.
         val experiments = FeedExperiments(
-            FeedExperimentConfig(weights = mapOf(FeedVariant.HEURISTIC to 1, FeedVariant.LEARNED to 1))
+            FeedExperimentConfig(weights = mapOf(FeedVariant.CONTROL to 1, FeedVariant.HEURISTIC to 1))
         )
         val userId = UUID.fromString("11111111-2222-4333-8444-555555555555")
 
@@ -30,7 +30,7 @@ class FeedExperimentTest {
         val experiments = FeedExperiments(
             FeedExperimentConfig(
                 enabled = false,
-                weights = mapOf(FeedVariant.HEURISTIC to 1, FeedVariant.LEARNED to 1),
+                weights = mapOf(FeedVariant.CONTROL to 1, FeedVariant.HEURISTIC to 1),
                 shadow = FeedVariant.HEURISTIC,
             )
         )
@@ -110,22 +110,22 @@ class FeedExperimentTest {
     fun `the shadow arm runs when it differs from the served arm`() {
         val experiments = FeedExperiments(
             FeedExperimentConfig(
-                weights = mapOf(FeedVariant.HEURISTIC to 1),
-                shadow = FeedVariant.LEARNED,
+                weights = mapOf(FeedVariant.CONTROL to 1),
+                shadow = FeedVariant.HEURISTIC,
             )
         )
 
-        assertEquals(FeedVariant.LEARNED, experiments.shadowFor(UUID.randomUUID()))
+        assertEquals(FeedVariant.HEURISTIC, experiments.shadowFor(UUID.randomUUID()))
     }
 
     // -------------------------------------------------------- yapilandirma
 
     @Test
     fun `the configuration is read from a single string`() {
-        val config = FeedExperimentConfig.parse("control:1,heuristic:9", true, "learned", "tuz")
+        val config = FeedExperimentConfig.parse("control:1,heuristic:9", true, "heuristic", "tuz")
 
         assertEquals(mapOf(FeedVariant.CONTROL to 1, FeedVariant.HEURISTIC to 9), config.weights)
-        assertEquals(FeedVariant.LEARNED, config.shadow)
+        assertEquals(FeedVariant.HEURISTIC, config.shadow)
         assertEquals("tuz", config.salt)
     }
 
@@ -141,6 +141,33 @@ class FeedExperimentTest {
         assertFailsWith<IllegalArgumentException> {
             FeedExperimentConfig.parse("heuristic:1", true, "yokboyle", "tuz")
         }
+    }
+
+    @Test
+    fun `an arm that cannot actually run is refused`() {
+        // Sessiz bir veri bozulmasi: kol yalnizca soy kutugune etiket olarak
+        // yaziliyor, siralamayi degistirmiyor. Kabul edilseydi `learned`
+        // koluna dusen kullanici heuristik siralama alir, kayit "learned"
+        // derdi ve sonraki kol karsilastirmasi heuristigi heuristikle
+        // kiyaslayip "fark yok" sonucuna varirdi.
+        assertFailsWith<IllegalArgumentException> {
+            FeedExperimentConfig(weights = mapOf(FeedVariant.LEARNED to 1))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            FeedExperimentConfig.parse("heuristic:9,learned:1", true, null, "tuz")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            FeedExperimentConfig.parse("heuristic:1", true, "learned", "tuz")
+        }
+    }
+
+    @Test
+    fun `an arm with zero weight may name an unimplemented variant`() {
+        // Agirligi sifir olan kola kimse dusmez; ayari onceden yazip sonra
+        // acmak icin engellemeye gerek yok.
+        val config = FeedExperimentConfig.parse("heuristic:1,learned:0", true, null, "tuz")
+
+        assertEquals(0, config.weights[FeedVariant.LEARNED])
     }
 
     @Test

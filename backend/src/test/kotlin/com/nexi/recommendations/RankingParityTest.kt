@@ -82,12 +82,22 @@ class RankingParityTest {
 
         assertTrue(FIXTURE.exists(), "referans dosyası bulunamadı: $FIXTURE")
         assertEquals(
-            FIXTURE.readText(),
-            encoded,
+            FIXTURE.readText().normalizeLineEndings(),
+            encoded.normalizeLineEndings(),
             "Sıralayıcı değişti. Python tarafını da güncelleyip dosyayı yeniden üret: " +
                 "gradle test --tests '*RankingParityTest*' -Dnexi.parity.write=true",
         )
     }
+
+    /**
+     * Satır sonu farkı sıralayıcı farkı değil.
+     *
+     * Depo kökündeki `.gitattributes` checkout'u LF'e sabitliyor, ama o
+     * ayardan önce klonlanmış bir çalışma ağacında dosya hâlâ CRLF olabilir.
+     * Karşılaştırmayı normalleştirmek, testin yalnızca Windows'ta patlamasını
+     * ikinci bir kez engelliyor.
+     */
+    private fun String.normalizeLineEndings(): String = replace("\r\n", "\n")
 
     @Test
     fun `the fixture exercises every scoring component`() {

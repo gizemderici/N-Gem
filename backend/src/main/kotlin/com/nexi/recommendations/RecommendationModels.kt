@@ -167,7 +167,19 @@ data class RecommendationProfileStats(
 @Serializable
 data class RecommendationExport(
     val events: List<Map<String, String?>> = emptyList(),
+    /**
+     * Gösterilen ve gölge istekler birlikte; her satır `shadow_of` alanıyla
+     * hangisi olduğunu söylüyor. Gölge kayıtları dışarıda bırakmak, kullanıcı
+     * hakkında tutulan verinin bir bölümünü gizlemek olurdu.
+     */
     val feedRequests: List<Map<String, String?>> = emptyList(),
+    /**
+     * Değerlendirilen adaylar ve puanları.
+     *
+     * Erişim hakkının asıl karşılığı burası: "neden bu içeriği gördüm"
+     * sorusu ancak elenen adaylar ve puanlar görülünce cevaplanabilir.
+     */
+    val feedCandidates: List<Map<String, String?>> = emptyList(),
     val featureSnapshots: List<Map<String, String?>> = emptyList(),
     val hiddenPosts: List<Map<String, String?>> = emptyList(),
 )

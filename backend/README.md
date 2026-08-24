@@ -428,7 +428,7 @@ uygulamayı yeniden kurmak grubu kaydırmaz.
 |---|---|
 | `control` | Kronolojik akış; karşılaştırmanın taban çizgisi |
 | `heuristic` | Bugünkü `nexi-contextual-v1` |
-| `learned` | Eğitilmiş model — bugün yalnızca gölgede anlamlı, yüklü ağırlık dosyası yok |
+| `learned` | Eğitilmiş model — **bugün yapılandırmada reddediliyor**, backend'de model yükleyen kod yok |
 
 | Değişken | Varsayılan | Açıklama |
 |---|---|---|
@@ -440,6 +440,11 @@ uygulamayı yeniden kurmak grubu kaydırmaz.
 Yanlış yazılmış bir `FEED_EXPERIMENT` değeri sessizce yok sayılmaz, uygulama
 açılışta hata verir: yanlış ayarın kullanıcıların yarısını başka bir kola
 atması, fark edilmesi en zor hatalardan biri olurdu.
+
+**Gölge bugün çalışmıyor.** Yol kodda duruyor ama hiçbir geçerli
+yapılandırma onu tetikleyemiyor: `control` kolu kişiselleştirmeden önce
+dönüyor, `heuristic` kendisini gölgeleyemiyor, `learned` ise reddediliyor.
+İkinci bir sıralayıcı geldiğinde canlanacak.
 
 **Gölge çalışma.** `FEED_SHADOW_VARIANT` verildiğinde, gösterilen koldan farklı
 olması şartıyla ikinci bir sıralama hesaplanır, kullanıcıya gösterilmez ve
@@ -466,10 +471,21 @@ gerektiriyor.
 | `PUT` | `/api/v1/recommendations/consent` | `{ "granted": true }` |
 | `GET` | `/api/v1/recommendations/export` | Ham öneri verisinin tamamı, JSON |
 
+Dışa aktarma değerlendirilen adayları (`feed_candidates`) ve gölge sıralama
+kayıtlarını da içeriyor. "Neden bu içeriği gördüm" sorusu ancak elenen adaylar
+ve puanlar görülünce cevaplanabilir; gölgeyi dışarıda bırakmak da kullanıcı
+hakkında tutulan verinin bir bölümünü gizlemek olurdu.
+
 Kaydı olmayan kullanıcı için varsayılan **rıza yok**: sessizce "açık" saymak
 kullanıcıyı hiç sorulmadan profillemek olurdu. Rıza yokken davranış olayı
 yazılmaz (uç `accepted: 0` döner, hata değil — rızayı geri çekmek istemciyi
 hata döngüsüne sokmamalı), akış kişiselleştirilmez ve soy kütüğü tutulmaz.
+
+Rıza kapısı sunucunun kendi ürettiği sinyalleri de kapsıyor: beğeni,
+kaydetme ve şikâyet AI Faz 1'de sunucu tarafına taşınınca bu kontrolü
+atlıyorlardı — rıza vermemiş bir kullanıcının beğenisi yine de AI verisi
+üretiyordu. Etkileşimin kendisi (beğeni sayacı, şikâyet kaydı) her hâlükârda
+yazılıyor; yazılmayan yalnızca öneri sinyali.
 Rıza geri çekildiğinde öğrenilmiş profil de silinir.
 
 Silme, soy kütüğünü de kaldırıyor: `feed_requests` gidince `ON DELETE CASCADE`

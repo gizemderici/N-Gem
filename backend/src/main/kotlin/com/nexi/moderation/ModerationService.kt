@@ -4,6 +4,7 @@ import com.nexi.auth.ApiException
 import com.nexi.auth.validation
 import com.nexi.media.AvatarUrls
 import com.nexi.media.ObjectStorage
+import com.nexi.recommendations.PersonalizationConsent
 import com.nexi.recommendations.RecommendationEventType
 import com.nexi.recommendations.RecommendationSink
 import com.nexi.recommendations.serverEvent
@@ -21,6 +22,7 @@ class ModerationService(
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
     private val recommendations: RecommendationSink = RecommendationSink.NOOP,
+    private val consent: PersonalizationConsent = PersonalizationConsent.ALWAYS_GRANTED,
 ) {
     private val logger = LoggerFactory.getLogger(ModerationService::class.java)
 
@@ -109,7 +111,9 @@ class ModerationService(
         // Şikâyet en güçlü olumsuz sinyal; istemcinin ayrıca bildirmesini
         // beklemek onu kaybetmek demekti. Yalnızca ilk şikâyette ve yalnızca
         // gönderiler için yazılır -- kullanıcı şikâyetinin sıralama karşılığı yok.
-        if (!alreadyReported && targetType == ReportTargetType.POST) {
+        // Riza vermemis kullanicinin sikayeti AI verisi uretmemeli; sikayetin
+        // kendisi moderasyon kaydi olarak zaten yazildi.
+        if (!alreadyReported && targetType == ReportTargetType.POST && consent.isGranted(reporterId)) {
             runCatching {
                 recommendations.emit(
                     listOf(serverEvent(reporterId, targetId, RecommendationEventType.CONTENT_REPORTED, "report", now))

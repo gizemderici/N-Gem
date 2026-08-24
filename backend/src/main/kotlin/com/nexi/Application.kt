@@ -38,6 +38,7 @@ import com.nexi.posts.PostService
 import com.nexi.posts.postRoutes
 import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.JdbcConsentRepository
+import com.nexi.recommendations.asPersonalizationConsent
 import com.nexi.recommendations.JdbcRecommendationRepository
 import com.nexi.recommendations.RecommendationService
 import com.nexi.recommendations.recommendationRoutes
@@ -123,6 +124,7 @@ fun Application.module() {
         storage = objectStorage,
         recommendationRepository = recommendationRepository,
         notifications = notificationService,
+        consent = consentRepository.asPersonalizationConsent(),
     )
     val recommendationService = RecommendationService(
         repository = recommendationRepository,
@@ -147,6 +149,7 @@ fun Application.module() {
         users = { username -> profileRepository.findIdByUsername(username) },
         storage = objectStorage,
         recommendations = { events -> recommendationRepository.append(events) },
+        consent = consentRepository.asPersonalizationConsent(),
     )
     val searchService = SearchService(postRepository, JdbcSearchRepository(dataSource), objectStorage)
     val topicService = TopicService(topicRepository)

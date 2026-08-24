@@ -20,14 +20,23 @@ enum class FeedVariant(val wireName: String) {
     /**
      * Eğitilmiş model.
      *
-     * Bugün yalnızca gölge modda anlamlı: `recommender-lab` henüz üretime
-     * aday bir model üretmedi, backend'de yüklü bir ağırlık dosyası yok.
-     * Kol şimdiden tanımlı ki Faz 5 bir model ürettiğinde yalnızca ayar
-     * değişsin, kod değil.
+     * **Henüz çalıştırılamıyor**: backend'de model dosyası yükleyen kod yok,
+     * `recommender-lab` da üretime aday bir model üretmedi. Kol tanımlı ki
+     * model geldiğinde ayar değişsin, kod değil — ama bugün seçilirse
+     * yapılandırma reddediliyor.
+     *
+     * Reddetmenin sebebi sessiz bir veri bozulması: kol yalnızca soy
+     * kütüğüne etiket olarak yazılıyor, sıralamayı değiştirmiyor. Kabul
+     * edilseydi `learned` koluna düşen kullanıcı heuristik sıralama alır,
+     * kayıt "learned" derdi. Sonraki kol karşılaştırması heuristiği
+     * heuristikle kıyaslayıp "fark yok" sonucuna varırdı.
      */
     LEARNED("learned");
 
     companion object {
+        /** Bugün gerçekten çalıştırılabilen kollar. */
+        val IMPLEMENTED: Set<FeedVariant> = setOf(CONTROL, HEURISTIC)
+
         fun fromWire(raw: String): FeedVariant? =
             entries.firstOrNull { it.wireName.equals(raw.trim(), ignoreCase = true) }
     }
@@ -57,6 +66,17 @@ data class FeedExperimentConfig(
 ) {
     init {
         require(weights.values.all { it >= 0 }) { "deney ağırlıkları negatif olamaz" }
+
+        // Çalıştırılamayan bir kola kullanıcı atamak, sıralamayı değiştirmeden
+        // soy kütüğünü yanlış etiketlemek demek. Ölçüm verisini sessizce
+        // bozmaktansa açılışta durmak doğru.
+        val unusable = weights.filterValues { it > 0 }.keys - FeedVariant.IMPLEMENTED
+        require(unusable.isEmpty()) {
+            "bu kol henüz çalıştırılamıyor: ${unusable.joinToString { it.wireName }}"
+        }
+        require(shadow == null || shadow in FeedVariant.IMPLEMENTED) {
+            "bu gölge kolu henüz çalıştırılamıyor: ${shadow?.wireName}"
+        }
     }
 
     val totalWeight: Int get() = weights.values.sum()

@@ -57,51 +57,41 @@ class FeedShadowTest {
     private fun publish(text: String) = posts.create(viewerId, CreatePostRequest(text = text)).id
 
     @Test
-    fun `the shadow ranking is recorded against the served request and never shown`() {
+    fun `the served request is recorded with the arm that actually ranked it`() {
         repeat(3) { publish("Gönderi $it") }
 
         val page = policy(
-            FeedExperimentConfig(
-                weights = mapOf(FeedVariant.HEURISTIC to 1),
-                shadow = FeedVariant.LEARNED,
-            )
+            FeedExperimentConfig(weights = mapOf(FeedVariant.HEURISTIC to 1))
         ).feed(viewerId, null, 2, context)
 
-        // Kullanıcı yalnızca gösterilen kolu görür.
         assertEquals(2, page.items.size)
         val servedId = UUID.fromString(assertNotNull(page.requestId))
 
-        val served = lineage.recorded.single { it.shadowOf == null }
+        val served = lineage.recorded.single()
         assertEquals(servedId, served.id)
+        // Etiket gercekten siralamayi yapan kol olmali; yanlis etiket sonraki
+        // kol karsilastirmasini sessizce anlamsizlastirirdi.
         assertEquals(FeedVariant.HEURISTIC.wireName, served.experimentVariant)
         assertEquals(2, served.returnedCount)
+        assertNull(served.shadowOf)
     }
 
     @Test
-    fun `the shadow run compares against the same candidate pool`() {
+    fun `no configuration can produce a shadow run today`() {
+        // Golge yazma yolu bugun erisilemez ve bunu gizlemek yerine yaziyoruz.
+        // CONTROL kolu kisisellestirmeden once donuyor, HEURISTIC ile ayni kol
+        // golgelenmiyor, ve LEARNED yapilandirmada reddediliyor. Ikinci bir
+        // siralayici geldiginde (Demo Faz 16) yol canlanacak.
         repeat(3) { publish("Gönderi $it") }
 
-        policy(
-            FeedExperimentConfig(
-                weights = mapOf(FeedVariant.LEARNED to 1),
-                shadow = FeedVariant.HEURISTIC,
-            )
-        ).feed(viewerId, null, 2, context)
-
-        val served = lineage.recorded.single { it.shadowOf == null }
-        val shadow = lineage.recorded.single { it.shadowOf != null }
-
-        assertEquals(served.id, shadow.shadowOf)
-        assertEquals(FeedVariant.HEURISTIC.wireName, shadow.experimentVariant)
-        // Fark modelden gelmeli, girdiden değil: aynı havuz, aynı an.
-        assertEquals(
-            served.candidates.map { it.postId }.toSet(),
-            shadow.candidates.map { it.postId }.toSet(),
-        )
-        assertEquals(served.requestedAt, shadow.requestedAt)
-        // Gölge gösterilmedi.
-        assertEquals(0, shadow.returnedCount)
-        assertTrue(shadow.candidates.all { it.position == null })
+        listOf(
+            FeedExperimentConfig(weights = mapOf(FeedVariant.HEURISTIC to 1), shadow = FeedVariant.HEURISTIC),
+            FeedExperimentConfig(weights = mapOf(FeedVariant.CONTROL to 1), shadow = FeedVariant.HEURISTIC),
+        ).forEach { config ->
+            lineage.recorded.clear()
+            policy(config).feed(viewerId, null, 2, context)
+            assertTrue(lineage.recorded.none { it.shadowOf != null }, "golge kaydi beklenmiyor: $config")
+        }
     }
 
     @Test

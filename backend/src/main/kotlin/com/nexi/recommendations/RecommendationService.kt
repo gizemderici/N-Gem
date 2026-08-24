@@ -83,6 +83,7 @@ class RecommendationService(
             counts = mapOf(
                 "events" to data.events.size,
                 "feedRequests" to data.feedRequests.size,
+                "feedCandidates" to data.feedCandidates.size,
                 "featureSnapshots" to data.featureSnapshots.size,
                 "hiddenPosts" to data.hiddenPosts.size,
             ),

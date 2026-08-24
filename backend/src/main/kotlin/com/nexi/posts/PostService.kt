@@ -7,6 +7,7 @@ import com.nexi.notifications.NotificationSink
 import com.nexi.notifications.NotificationTargetType
 import com.nexi.notifications.NotificationType
 import com.nexi.recommendations.EmptyRecommendationRepository
+import com.nexi.recommendations.PersonalizationConsent
 import com.nexi.recommendations.RecommendationEventType
 import com.nexi.recommendations.RecommendationRepository
 import com.nexi.recommendations.serverEvent
@@ -25,6 +26,7 @@ class PostService(
     private val clock: Clock = Clock.systemUTC(),
     private val recommendationRepository: RecommendationRepository = EmptyRecommendationRepository,
     private val notifications: NotificationSink = NotificationSink.NOOP,
+    private val consent: PersonalizationConsent = PersonalizationConsent.ALWAYS_GRANTED,
 ) {
     private val logger = LoggerFactory.getLogger(PostService::class.java)
     private val mediaUrlExpiry = Duration.ofMinutes(15)
@@ -154,6 +156,10 @@ class PostService(
         now: Instant,
     ) {
         if (!active || alreadyActive) return
+        // Riza vermemis kullanicinin begenisi AI verisi uretmemeli. Kontrol
+        // RecommendationService icinde vardi ama sunucu uretimli sinyaller o
+        // kapiyi atliyordu.
+        if (!consent.isGranted(userId)) return
         runCatching {
             recommendationRepository.append(listOf(serverEvent(userId, postId, type, "post", now)))
         }.onFailure {

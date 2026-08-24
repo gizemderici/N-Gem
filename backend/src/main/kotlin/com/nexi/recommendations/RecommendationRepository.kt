@@ -219,9 +219,20 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
             ),
             feedRequests = connection.rows(
                 """SELECT id, requested_at, model_version, policy_version, feature_version,
-                          experiment_variant, local_hour, personalized, candidate_count, returned_count
-                   FROM feed_requests WHERE user_id = ? AND shadow_of IS NULL
+                          experiment_variant, local_hour, personalized, candidate_count,
+                          returned_count, duration_millis, shadow_of
+                   FROM feed_requests WHERE user_id = ?
                    ORDER BY requested_at""",
+                userId,
+            ),
+            feedCandidates = connection.rows(
+                """SELECT fc.feed_request_id, fc.post_id, fc.candidate_source, fc.raw_score,
+                          fc.final_score, fc.position, fc.reason, fc.like_count, fc.comment_count,
+                          fc.age_hours, fc.media_type, array_to_string(fc.topic_slugs, ';') AS topic_slugs
+                   FROM feed_candidates fc
+                   JOIN feed_requests fr ON fr.id = fc.feed_request_id
+                   WHERE fr.user_id = ?
+                   ORDER BY fr.requested_at, fc.position NULLS LAST""",
                 userId,
             ),
             featureSnapshots = connection.rows(

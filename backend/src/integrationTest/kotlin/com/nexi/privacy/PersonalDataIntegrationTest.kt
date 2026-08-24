@@ -88,6 +88,33 @@ class PersonalDataIntegrationTest {
     }
 
     @Test
+    fun `the export includes the candidates that produced the ranking`() {
+        // Erişim hakkının asıl karşılığı burası: "neden bu içeriği gördüm"
+        // sorusu ancak değerlendirilen adaylar ve puanları görülünce
+        // cevaplanabilir. Dışa aktarma bunları hiç içermiyordu.
+        val candidate = recommendations.export(userId).feedCandidates.single()
+
+        assertEquals(postId.toString(), candidate["post_id"])
+        assertEquals("DISCOVERY", candidate["candidate_source"])
+        assertEquals("0", candidate["position"])
+        assertEquals("teknoloji", candidate["topic_slugs"])
+        assertTrue(candidate["final_score"] != null)
+    }
+
+    @Test
+    fun `the export includes shadow rankings, not just what was shown`() {
+        // Gölge kayıtları dışarıda bırakmak, kullanıcı hakkında tutulan
+        // verinin bir bölümünü gizlemek olurdu.
+        recordShadowRequest(userId, postId, now)
+
+        val requests = recommendations.export(userId).feedRequests
+
+        assertEquals(2, requests.size)
+        assertEquals(1, requests.count { it["shadow_of"] != null }, "gölge kaydı da dönmeli")
+        assertEquals(1, requests.count { it["shadow_of"] == null })
+    }
+
+    @Test
     fun `resetting the profile removes the lineage too, not just the events`() {
         // Eskiden yalnızca olaylar siliniyordu; kullanıcı "sildim" dediği veri
         // feed_requests ve user_feature_snapshots içinde kalıp eğitim setine
@@ -167,7 +194,29 @@ class PersonalDataIntegrationTest {
         platform = EventPlatform.IOS,
     )
 
-    private fun recordRequest(user: UUID, post: UUID, at: Instant) {
+    /** Gösterilmeyen gölge koşusu; asıl isteğe bağlı, hiçbir adayın konumu yok. */
+    private fun recordShadowRequest(user: UUID, post: UUID, at: Instant) {
+        val servedId = dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT id FROM feed_requests WHERE user_id = ? AND shadow_of IS NULL LIMIT 1"
+            ).use { statement ->
+                statement.setObject(1, user)
+                statement.executeQuery().use { results ->
+                    results.next()
+                    results.getObject(1, UUID::class.java)
+                }
+            }
+        }
+        recordRequest(user, post, at, shadowOf = servedId, position = null)
+    }
+
+    private fun recordRequest(
+        user: UUID,
+        post: UUID,
+        at: Instant,
+        shadowOf: UUID? = null,
+        position: Int? = 0,
+    ) {
         lineage.record(
             FeedRequestRecord(
                 id = UUID.randomUUID(),
@@ -181,13 +230,14 @@ class PersonalDataIntegrationTest {
                 localHour = 12,
                 timezoneOffsetMinutes = 180,
                 personalized = true,
+                shadowOf = shadowOf,
                 candidates = listOf(
                     FeedCandidateRecord(
                         postId = post,
                         source = CandidateSource.DISCOVERY,
                         rawScore = 0.1,
                         finalScore = 0.9,
-                        position = 0,
+                        position = position,
                         reason = "test",
                         likeCount = 0,
                         commentCount = 0,
