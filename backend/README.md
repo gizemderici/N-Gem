@@ -1048,6 +1048,30 @@ AI tabloları: `recommendation_events`, `recommendation_consents`,
 `feed_requests`, `feed_candidates`, `user_feature_snapshots`,
 `feed_fallbacks`, `hidden_posts`.
 
+### Kurgu demo verisi
+
+Tamamı uydurma; hiçbir gerçek kullanıcı verisi yok. İçerik
+[`seed/demo_content.py`](seed/demo_content.py) içinde, orkestrasyon
+`seed_demo.py` dosyasında.
+
+| | |
+|---|---|
+| Kullanıcı | 12 |
+| Gönderi | 114, on iki konuya dağılmış |
+| Medya | 4 görsel + 2 kısa video |
+
+Her kullanıcının **davranış profili** ayrı: hangi saatte hangi konuya
+derinlemesine baktığı, neye göz gezdirdiği ve neyi gizlediği tanımlı.
+Sıralayıcı zaman dilimlerini ayrı ağırlıklandırdığı için aynı kullanıcı
+sabah ve akşam farklı akış görüyor.
+
+Planın istediği desen: mesai saatinde yazılım, akşam oyun, sabah spor, gece
+müzik, seyahat içeriğine olumsuz tepki.
+
+Beğeni, kaydetme ve şikâyet **gerçek uçlardan** gönderiliyor — üçü de sunucu
+üretimli olay olduğu için istemciden gönderilemez; uçları kullanmak hem
+ürün kaydını hem AI sinyalini üretiyor.
+
 ### Kişiselleştirme rızası şart
 
 Rıza varsayılan olarak kapalı. Açılmadan akış kronolojik kalır, öneri

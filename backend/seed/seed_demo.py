@@ -14,7 +14,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -22,100 +22,23 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 DEFAULT_PASSWORD = "Demo1234!"
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
-
-@dataclass(frozen=True)
-class DemoUser:
-    full_name: str
-    username: str
-    email: str
-    bio: str
-    topics: tuple[str, ...]
-    avatar: str
-
-
-USERS = (
-    DemoUser("Deniz Test", "demo_deneme", "demo.deneme@nsosyal.local", "Yeni fikirleri, şehir hayatını ve teknolojiyi keşfediyorum.", ("teknoloji", "yapay-zeka", "seyahat", "egitim"), "istanbul-vapur.jpg"),
-    DemoUser("Berk Yalın", "demo_berk", "demo.berk@nsosyal.local", "Mobil ürün geliştirici; küçük deneyler ve ölçülebilir sonuçlar.", ("teknoloji", "yapay-zeka", "girisimcilik", "bilim"), "teknoloji-yapay-zeka.jpg"),
-    DemoUser("Mert Can", "demo_mert", "demo.mert@nsosyal.local", "Kahve, oyun ve günlük hayatın komik tarafları.", ("oyun", "muzik", "teknoloji", "sanat"), "mizah-kafe.jpg"),
-    DemoUser("Ece Aydın", "demo_ece", "demo.ece@nsosyal.local", "Koşuyorum, geziyorum ve İstanbul notları biriktiriyorum.", ("spor", "seyahat", "saglik", "gundem"), "istanbul-vapur.jpg"),
-    DemoUser("Aylin Demir", "demo_aylin", "demo.aylin@nsosyal.local", "Seramik, sinema ve yerel kültür üzerine notlar.", ("sanat", "muzik", "egitim", "seyahat"), "kultur-seramik.jpg"),
-    DemoUser("Selin Akay", "demo_selin", "demo.selin@nsosyal.local", "Ürün tasarımcısı; sade arayüzler ve erişilebilir deneyimler.", ("teknoloji", "sanat", "egitim", "girisimcilik"), "teknoloji-yapay-zeka.jpg"),
-    DemoUser("Onur Kaya", "demo_onur", "demo.onur@nsosyal.local", "Bilim, spor ve sürdürülebilir yaşam meraklısı.", ("bilim", "spor", "saglik", "gundem"), "mizah-kafe.jpg"),
-    DemoUser("Zeynep Aras", "demo_zeynep", "demo.zeynep@nsosyal.local", "Müzik, yemek ve hafta sonu rotaları paylaşıyorum.", ("muzik", "seyahat", "sanat", "saglik"), "kultur-seramik.jpg"),
-)
-
-
-POSTS = (
-    {"username": "demo_berk", "topic": "yapay-zeka", "text": "Yapay zeka destekli mobil uygulama prototipini bugün gerçek kullanıcı akışıyla denedik. Teknoloji ancak sade bir deneyime dönüştüğünde işe yarıyor. #teknoloji #yazılım", "asset": "teknoloji-yapay-zeka.jpg"},
-    {"username": "demo_berk", "topic": "teknoloji", "text": "Altı saniyelik ürün günlüğü: yapay zeka, mobil arayüz ve küçük ama ölçülebilir bir iyileştirme. Mesai saatlerinde böyle kısa teknoloji videoları iyi gidiyor.", "asset": "teknoloji-demo.mp4"},
-    {"username": "demo_berk", "topic": "egitim", "text": "Bugünün öğrenme notu: iyi yazılım önce problemi anlatır, sonra kodu gösterir. Eğitim içeriklerinde örnek, açıklamadan daha güçlü olabilir."},
-    {"username": "demo_mert", "topic": "sanat", "text": "Kahveyi masaya değil de sohbete katınca ortaya çıkan an. Biraz mizah, biraz komik tesadüf; günün yorgunluğunu aldı. ☕️", "asset": "mizah-kafe.jpg"},
-    {"username": "demo_mert", "topic": "oyun", "text": "Akşam molası için kısa mizah videosu: kahve köpüğü planı bozdu, arkadaşlar günü kurtardı. Eğlence bazen tam olarak budur.", "asset": "mizah-demo.mp4"},
-    {"username": "demo_mert", "topic": "teknoloji", "text": "Toplantıda 'son bir madde' denince bilgisayarın pilinin yüzde bire düşmesi kadar gerçek bir espri yok. #mizah #komik"},
-    {"username": "demo_ece", "topic": "seyahat", "text": "İstanbul vapurunda gün doğumu: yerel hayatın en güzel tarafı, şehrin telaşı başlamadan birkaç dakika suya bakabilmek. Bugün bu rota çok sakindi.", "asset": "istanbul-vapur.jpg"},
-    {"username": "demo_ece", "topic": "spor", "text": "Sahilde otuz dakikalık koşu tamamlandı. Spor için büyük hedeflerden önce düzenli küçük adımların daha sürdürülebilir olduğunu yeniden gördüm."},
-    {"username": "demo_aylin", "topic": "sanat", "text": "Atölyede bugün mavi ve toprak tonlarını bir araya getirdik. Kültür ve sanat, gündelik bir objeyi hikâyeye dönüştürebiliyor.", "asset": "kultur-seramik.jpg"},
-    {"username": "demo_aylin", "topic": "muzik", "text": "Bu haftanın kültür listesi: bir kısa film, yeni bir müzik albümü ve mahalledeki küçük seramik sergisi. Yerel sanat üreticilerini keşfetmeyi seviyorum."},
-    {"username": "demo_selin", "topic": "teknoloji", "text": "Arayüz tasarımında bugünkü ders: kullanıcıya beş seçenek vermek yerine doğru anda tek net eylem sunmak. Sadelik, eksiklik değil önceliklendirmedir."},
-    {"username": "demo_deneme", "topic": "gundem", "text": "Bugün ana akışta farklı görüşleri dengeli biçimde görebilmek üzerine düşündüm. İyi bir keşif deneyimi yalnızca popüler olanı tekrar etmemeli."},
-    {"username": "demo_deneme", "topic": "seyahat", "text": "Hafta sonu için plansız bir mahalle yürüyüşü yaptım; küçük kitapçı ve sakin bir park günün en iyi iki keşfiydi."},
-    {"username": "demo_deneme", "topic": "egitim", "text": "Yeni bir konuyu öğrenirken on dakikalık günlük tekrarların uzun ama düzensiz çalışmadan daha kalıcı olduğunu fark ettim."},
-    {"username": "demo_berk", "topic": "girisimcilik", "text": "Demo gününde en değerli ölçüm alkış değil, kullanıcının nerede duraksadığıydı. Ürün kararını gözleme bağlayınca tartışma kısalıyor."},
-    {"username": "demo_berk", "topic": "bilim", "text": "Bir öneri sistemini değerlendirirken tek bir doğruluk sayısı yetmiyor; çeşitlilik, yenilik ve kullanıcı kontrolü de ölçülmeli."},
-    {"username": "demo_mert", "topic": "oyun", "text": "Bu akşam ekipçe kısa bir strateji oyunu oynadık. Kazanan plan değil, son anda yapılan sakin iletişim oldu. #oyun"},
-    {"username": "demo_mert", "topic": "muzik", "text": "Çalışma listesine lo-fi yerine eski film müzikleri ekledim; aynı masanın havası bir anda değişti."},
-    {"username": "demo_ece", "topic": "saglik", "text": "Koşu sonrası dinlenmeyi antrenmanın parçası saymaya başladım. Uyku ve su takibi performanstan önce geliyor."},
-    {"username": "demo_ece", "topic": "gundem", "text": "Mahallede araçsız ulaşım için yeni bir rota konuşuluyor. Kent kararlarında yürüyenlerin deneyimi de masada olmalı."},
-    {"username": "demo_aylin", "topic": "sanat", "text": "Kısa film gösteriminden not: iyi bir sahne bazen tek cümle kurmadan karakterin bütün derdini anlatabiliyor."},
-    {"username": "demo_aylin", "topic": "egitim", "text": "Seramik atölyesinde bugün hata diye ayırdığımız parçaları inceledik. El işi öğrenmenin güzel yanı, kusurun yönteme dönüşebilmesi."},
-    {"username": "demo_selin", "topic": "girisimcilik", "text": "İlk prototipte üç ekranı kaldırdık. Kullanıcı hedefe daha hızlı ulaştı; bazen en iyi geliştirme, doğru şeyi silmek oluyor."},
-    {"username": "demo_selin", "topic": "sanat", "text": "Erişilebilir tasarım için renk tek başına anlam taşımamalı. İkon, metin ve kontrast birlikte çalışınca arayüz herkes için güçleniyor."},
-    {"username": "demo_onur", "topic": "bilim", "text": "Bugün gökyüzü gözlem grubunda ışık kirliliğini ölçtük. Küçük bir sensör bile mahalle ölçeğinde anlamlı veri üretebiliyor."},
-    {"username": "demo_onur", "topic": "spor", "text": "Bisiklet rotasında hız yerine düzenli tempoya odaklandım. Eve daha az yorulup daha uzun mesafeyle döndüm."},
-    {"username": "demo_onur", "topic": "saglik", "text": "Ekran molası için her saat kısa bir yürüyüş deniyorum. Küçük alışkanlıkların gün sonundaki etkisi şaşırtıcı."},
-    {"username": "demo_zeynep", "topic": "muzik", "text": "Mahalle sahnesinde üç kişilik bir caz grubunu dinledim. Canlı müziğin en güzel yanı, aynı parçanın her seferinde değişmesi."},
-    {"username": "demo_zeynep", "topic": "seyahat", "text": "Günübirlik rota: erken tren, sahil yürüyüşü ve yerel pazarda uzun bir kahvaltı. Plan az olunca keşfe daha çok yer kaldı."},
-    {"username": "demo_zeynep", "topic": "saglik", "text": "Bugünün mutfak deneyi mevsim sebzeleriyle renkli bir tabak oldu. Sağlıklı yemek karmaşık tarif demek değil."},
-)
-
-FOLLOWS = {
-    "demo_deneme": ("demo_berk", "demo_ece", "demo_aylin", "demo_selin"),
-    "demo_berk": ("demo_deneme", "demo_selin", "demo_onur"),
-    "demo_mert": ("demo_berk", "demo_zeynep"),
-    "demo_ece": ("demo_deneme", "demo_onur", "demo_zeynep"),
-    "demo_aylin": ("demo_ece", "demo_selin", "demo_zeynep"),
-    "demo_selin": ("demo_berk", "demo_aylin"),
-    "demo_onur": ("demo_ece", "demo_berk"),
-    "demo_zeynep": ("demo_aylin", "demo_mert"),
-}
-
-COMMENTS = (
-    (0, "demo_selin", "Akışı sadeleştiren kararları ayrıca görmek isterim."),
-    (0, "demo_deneme", "Gerçek kullanıcı akışıyla ölçmek çok doğru bir başlangıç."),
-    (6, "demo_zeynep", "Bu rota gün doğumunda gerçekten çok güzel görünüyor."),
-    (7, "demo_onur", "Küçük ve düzenli adım yaklaşımı bende de çalışıyor."),
-    (8, "demo_ece", "Renklerin birlikteliği çok sıcak olmuş."),
-    (14, "demo_deneme", "Duraksama noktaları demo için güzel bir sinyal."),
-    (16, "demo_zeynep", "Bir sonraki oyun akşamına ben de katılacağım."),
-    (20, "demo_mert", "Sessiz anlatım gerçekten uzun süre akılda kalıyor."),
-    (24, "demo_berk", "Mahalle ölçeğinde açık veri fikri harika."),
-    (27, "demo_aylin", "Canlı performansın sürprizi kayıtta olmuyor."),
-)
-
-STORIES = (
-    ("demo_berk", "Bugünkü prototip masasından kısa bir kare.", "teknoloji-yapay-zeka.jpg"),
-    ("demo_ece", "Sabah vapuru, sakin şehir.", "istanbul-vapur.jpg"),
-    ("demo_aylin", "Atölyede yeni renk denemeleri.", "kultur-seramik.jpg"),
-    ("demo_mert", "Kahve molası beklenmedik şekilde uzadı.", "mizah-kafe.jpg"),
-)
-
-CONVERSATIONS = (
-    ("demo_deneme", "demo_berk", ("Demo akışını yarın birlikte kontrol edelim mi?", "Olur, özellikle öneri nedenlerine bakalım.")),
-    ("demo_ece", "demo_onur", ("Hafta sonu bisiklet rotası için saat kaç uygun?", "Sabah dokuzda sahil başlangıcı iyi olur.")),
-    ("demo_aylin", "demo_zeynep", ("Cuma günkü kısa film gösterimine geliyor musun?", "Evet, çıkışta müzik listesini de konuşuruz.")),
+from demo_content import (  # noqa: E402
+    BEHAVIOURS,
+    BLOCKS,
+    COMMENTS,
+    CONVERSATIONS,
+    FOLLOWS,
+    POSTS,
+    STORIES,
+    USERS,
+    DemoBehaviour,
+    DemoUser,
+    is_blocked,
 )
 
 
@@ -265,8 +188,7 @@ def add_social_proof(client: ApiClient, tokens: dict[str, str], posts: list[dict
     for user_index, (username, token) in enumerate(tokens.items()):
         for post_index, post in enumerate(posts):
             author = post["author"]["username"]
-            blocked_pair = {username, author} == {"demo_zeynep", "demo_onur"}
-            if author == username or blocked_pair:
+            if author == username or is_blocked(username, author):
                 continue
             if (post_index + user_index) % 5 == 0:
                 client.request("PUT", f"/api/v1/posts/{post['id']}/like", token=token)
@@ -341,31 +263,191 @@ def add_moderation_examples(client: ApiClient, tokens: dict[str, str]) -> dict[s
     return {"reportId": report["id"], "alreadyPresent": report in current_reports, "blocked": block["blocked"]}
 
 
-def seed_context_events(client: ApiClient, viewer_token: str, posts: list[dict[str, Any]]) -> dict[str, Any]:
-    by_text = {item["text"]: item for item in posts}
-    session_id = uuid.uuid5(uuid.NAMESPACE_URL, "nsosyal-demo-context-session-v2")
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    # `content_liked`, `content_saved` ve `content_reported` AI Faz 1'de
-    # sunucu üretimli oldu; istemciden gelirlerse `SERVER_ONLY_EVENT` ile
-    # reddediliyorlar. Beğeni ve kaydetme sinyallerini `add_social_proof`
-    # zaten gerçek etkileşim üzerinden ürettiriyor.
-    scenarios = (
-        (0, "content_impression", 11, None, None),
-        (0, "content_view", 11, 52_000, 0.86),
-        (1, "content_complete", 14, 6_000, 1.0),
-        (3, "content_view", 21, 31_000, 0.62),
-        (4, "content_complete", 21, 6_000, 1.0),
-        (6, "content_view", 19, 40_000, 0.75),
-        (8, "content_impression", 20, None, None),
-    )
-    events = []
-    for post_index, event_type, hour, dwell, completion in scenarios:
-        post_id = by_text[POSTS[post_index]["text"]]["id"]
-        events.append({"clientEventId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"nsosyal-demo-v2:{post_id}:{event_type}:{hour}")), "sessionId": str(session_id), "postId": post_id, "eventType": event_type, "surface": "seed_demo", "dwellMillis": dwell, "completionRatio": completion, "localHour": hour, "timezoneOffsetMinutes": 180, "occurredAt": now})
-    batch = client.request("POST", "/api/v1/recommendations/events", {"events": events}, viewer_token)
-    profile = client.request("GET", "/api/v1/recommendations/profile?localHour=21", token=viewer_token)
-    profile["seedBatch"] = batch
-    return profile
+def seed_behaviour(
+    client: ApiClient,
+    tokens: dict[str, str],
+    posts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Her kullanıcı için kendi ritmine uygun davranış olayları üretir.
+
+    Kullanıcıların akışları ancak davranışları farklıysa farklılaşır. Tek bir
+    kullanıcıya birkaç olay yazmak akışı kişiselleştirilmiş **gösteriyor** ama
+    kişiselleştirmenin işe yarayıp yaramadığını göstermiyordu.
+
+    Olay kimlikleri içerikten türetiliyor, yani betik tekrar çalıştırıldığında
+    aynı olaylar ikinci kez yazılmıyor.
+    """
+    by_topic: dict[str, list[dict[str, Any]]] = {}
+    for post in posts:
+        for topic in post.get("topics", []):
+            by_topic.setdefault(topic["slug"], []).append(post)
+
+    summary: dict[str, Any] = {"accepted": 0, "ignored": 0, "hidden": 0, "reported": 0}
+    for behaviour in BEHAVIOURS:
+        token = tokens.get(behaviour.username)
+        if token is None:
+            continue
+        events, hidden, reported = _behaviour_events(behaviour, by_topic, tokens)
+        for batch in _chunks(events, 100):
+            response = client.request(
+                "POST", "/api/v1/recommendations/events", {"events": batch}, token
+            )
+            summary["accepted"] += response.get("accepted", 0)
+            summary["ignored"] += response.get("ignored", 0)
+        summary["hidden"] += hidden
+        summary["reported"] += reported
+    return summary
+
+
+def _behaviour_events(
+    behaviour: DemoBehaviour,
+    by_topic: dict[str, list[dict[str, Any]]],
+    tokens: dict[str, str],
+) -> tuple[list[dict[str, Any]], int, int]:
+    session = str(uuid.uuid5(uuid.NAMESPACE_URL, f"nsosyal-demo-session:{behaviour.username}"))
+    events: list[dict[str, Any]] = []
+
+    for hour, deep_topics, skim_topics in behaviour.routine:
+        # Olay zamanı istenen yerel saate denk gelmeli; `occurredAt` son
+        # birkaç güne yayılıyor ki profil "yakın geçmiş" saysın.
+        for offset, (topics, deep) in enumerate(((deep_topics, True), (skim_topics, False))):
+            for topic in topics:
+                for index, post in enumerate(by_topic.get(topic, [])[:4]):
+                    author = post["author"]["username"]
+                    if author == behaviour.username or is_blocked(behaviour.username, author):
+                        continue
+                    occurred = _occurred_at(days_ago=1 + offset + index % 3, hour=hour)
+                    events.append(_event(behaviour, session, post, "content_impression", hour, occurred))
+                    if deep:
+                        events.append(
+                            _event(
+                                behaviour, session, post, "content_view", hour, occurred,
+                                dwell_millis=38_000 + index * 4_000,
+                                completion_ratio=0.82,
+                            )
+                        )
+                        if post["media"] and post["media"][0]["mimeType"].startswith("video/"):
+                            events.append(
+                                _event(
+                                    behaviour, session, post, "content_complete", hour, occurred,
+                                    dwell_millis=6_000, completion_ratio=1.0,
+                                )
+                            )
+                    else:
+                        events.append(
+                            _event(
+                                behaviour, session, post, "content_view", hour, occurred,
+                                dwell_millis=3_000 + index * 500,
+                                completion_ratio=0.18,
+                            )
+                        )
+
+    hidden = 0
+    for topic in behaviour.disliked:
+        for post in by_topic.get(topic, []):
+            if hidden >= behaviour.hide_limit:
+                break
+            if post["author"]["username"] == behaviour.username or is_blocked(
+                behaviour.username, post["author"]["username"]
+            ):
+                continue
+            occurred = _occurred_at(days_ago=2, hour=behaviour.routine[0][0])
+            events.append(
+                _event(behaviour, session, post, "content_impression", behaviour.routine[0][0], occurred)
+            )
+            events.append(
+                _event(behaviour, session, post, "content_hidden", behaviour.routine[0][0], occurred)
+            )
+            hidden += 1
+
+    # Şikâyet sunucu üretimli; gerçek uçtan gönderiliyor, olay listesine
+    # girmiyor. Sayısı raporda görünsün diye burada dönülüyor.
+    reported = sum(1 for topic in behaviour.reports if by_topic.get(topic))
+    return events, hidden, reported
+
+
+def _event(
+    behaviour: DemoBehaviour,
+    session: str,
+    post: dict[str, Any],
+    event_type: str,
+    hour: int,
+    occurred: str,
+    dwell_millis: int | None = None,
+    completion_ratio: float | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "clientEventId": str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"nsosyal-demo-v3:{behaviour.username}:{post['id']}:{event_type}:{hour}",
+            )
+        ),
+        "sessionId": session,
+        "postId": post["id"],
+        "eventType": event_type,
+        "surface": "seed_demo",
+        "localHour": hour,
+        "timezoneOffsetMinutes": 180,
+        "occurredAt": occurred,
+        "schemaVersion": 2,
+        "platform": "android",
+        "appVersion": "demo-1.0",
+    }
+    if dwell_millis is not None:
+        payload["dwellMillis"] = dwell_millis
+    if completion_ratio is not None:
+        payload["completionRatio"] = completion_ratio
+    return payload
+
+
+def _occurred_at(days_ago: int, hour: int) -> str:
+    moment = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return moment.replace(hour=hour, minute=15, second=0, microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _chunks(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def report_disliked_content(
+    client: ApiClient,
+    tokens: dict[str, str],
+    posts: list[dict[str, Any]],
+) -> int:
+    """Şikâyetler gerçek uçtan gönderiliyor.
+
+    `content_reported` sunucu üretimli bir olay; istemciden gönderilemez.
+    Şikâyet ucunu kullanmak hem moderasyon kaydını hem AI sinyalini
+    üretiyor, yani demo ikisini birden gösterebiliyor.
+    """
+    by_topic: dict[str, list[dict[str, Any]]] = {}
+    for post in posts:
+        for topic in post.get("topics", []):
+            by_topic.setdefault(topic["slug"], []).append(post)
+
+    created = 0
+    for behaviour in BEHAVIOURS:
+        token = tokens.get(behaviour.username)
+        if token is None:
+            continue
+        for topic in behaviour.reports:
+            candidates = [
+                post for post in by_topic.get(topic, [])
+                if post["author"]["username"] != behaviour.username
+                and not is_blocked(behaviour.username, post["author"]["username"])
+            ]
+            if not candidates:
+                continue
+            response = client.request(
+                "POST",
+                "/api/v1/reports",
+                {"targetType": "POST", "targetId": candidates[0]["id"], "reason": "SPAM"},
+                token,
+            )
+            if not response.get("alreadyReported"):
+                created += 1
+    return created
 
 
 def compact_feed(result: dict[str, Any], limit: int = 5) -> list[dict[str, str]]:
@@ -438,7 +520,10 @@ def main() -> int:
     moderation = add_moderation_examples(client, tokens)
 
     viewer_token = tokens[USERS[0].username]
-    profile = seed_context_events(client, viewer_token, posts)
+    print("[demo] Kullanıcı davranışları üretiliyor...", file=sys.stderr)
+    behaviour = seed_behaviour(client, tokens, posts)
+    reported = report_disliked_content(client, tokens, posts)
+    profile = client.request("GET", "/api/v1/recommendations/profile?localHour=21", token=viewer_token)
     media_smoke_test = verify_media_downloads(posts, enabled=not args.skip_media_check)
     work_feed = feed(client, viewer_token, 11, True)
     evening_feed = feed(client, viewer_token, 21, True)
@@ -462,6 +547,8 @@ def main() -> int:
         "personalizedFeed": work_feed.get("requestId") is not None,
         "mediaSmokeTest": media_smoke_test,
         "moderation": moderation,
+        "behaviourEvents": behaviour,
+        "reportsCreated": reported,
         "profile": profile,
         "workHoursTop5": compact_feed(work_feed),
         "eveningTop5": compact_feed(evening_feed),
