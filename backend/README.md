@@ -373,6 +373,22 @@ konum yetiyor, ve konum tabanlı sayfalama aynı gönderinin iki sayfada
 çıkmasını yapısal olarak imkânsız kılıyor. Saat bağlamı da imleçte, yoksa
 ikinci sayfa başka bir saatte istendiğinde sıralama kayardı.
 
+#### Siralama hedefleri
+
+Siralama dort hedefi dengeler ve hepsi ayarlanabilir:
+
+| Hedef | Ne yapar | Varsayilan |
+|---|---|---|
+| Ilgi | Kisisellestirme, guncellik, kalite, kesif | Acik |
+| Cesitlilik | Ayni yazar ve konu ortusmesi cezasi | Acik (0,55 / 0,25) |
+| Guvenlik | Kullanicinin gizledigi icerige benzeyene sert ceza | **Kapali** |
+| Uretici adaleti | Bir sayfada tek ureticiye slot siniri | **Kapali** |
+
+Son iki hedef kapali geliyor: temel siralama sistemi gercek veriyle
+kanitlanmadan yeni hedefleri herkese acmak, olcemedigimiz bir degisikligi
+uretime sokmak olurdu. Acilmalari deney kolu uzerinden ve Faz 8 kapilarindan
+gecerek yapilmali. Ayrinti [`docs/ai-roadmap.md`](docs/ai-roadmap.md).
+
 Havuz en fazla 300 aday tutar; bu aynı zamanda kişiselleştirilmiş akışın
 derinliği (20'lik sayfalarla 15 sayfa). `personalized=false` verildiğinde
 profil okunmaz, sunum olayı yazılmaz ve kronolojik akış döner.

@@ -31,7 +31,43 @@ data class RankingResult(
     val signalCount: Int,
 )
 
-class ContextualRanker {
+/**
+ * Sıralamanın hedefleri ve ağırlıkları.
+ *
+ * Varsayılanlar bugünkü davranışı **birebir** üretiyor: güvenlik ve adalet
+ * ağırlıkları sıfır. Temel sıralama sistemi henüz gerçek veriyle
+ * kanıtlanmadan yeni hedefleri herkese açmak, ölçemediğimiz bir değişikliği
+ * üretime sokmak olurdu. Açılmaları deney kolu üzerinden yapılmalı.
+ */
+data class RankingObjectives(
+    /** Aynı yazarın her tekrarı için doğrusal ceza. */
+    val authorPenalty: Double = 0.55,
+    /** Önceki gönderilerle konu/kelime örtüşmesi cezası. */
+    val topicOverlapPenalty: Double = 0.25,
+    /** Bu değerin altındaki yakınlık "kullanıcı bundan hoşlanmadı" sayılır. */
+    val safetyThreshold: Double = -0.5,
+    /** Eşiği geçen olumsuzluk için sert ceza; 0 kapalı demek. */
+    val safetyPenalty: Double = 0.0,
+    /** Bir sayfada tek üreticiye ayrılabilecek en fazla slot; 0 sınırsız. */
+    val creatorCap: Int = 0,
+    /** Üst sınır aşıldığında uygulanan ceza. */
+    val creatorCapPenalty: Double = 5.0,
+) {
+    init {
+        require(authorPenalty >= 0 && topicOverlapPenalty >= 0) { "çeşitlilik cezaları negatif olamaz" }
+        require(safetyPenalty >= 0) { "güvenlik cezası negatif olamaz" }
+        require(creatorCap >= 0) { "üretici sınırı negatif olamaz" }
+    }
+
+    /** Bugünkü üretim davranışı. */
+    companion object {
+        val DEFAULT = RankingObjectives()
+    }
+}
+
+class ContextualRanker(
+    private val objectives: RankingObjectives = RankingObjectives.DEFAULT,
+) {
     val modelVersion = "nexi-contextual-v1"
 
     /**
@@ -78,7 +114,7 @@ class ContextualRanker {
                 rawScore = personalized,
             )
         }
-        return RankingResult(diversify(scored), snapshot, signals.size)
+        return RankingResult(diversify(scored, objectives, affinities), snapshot, signals.size)
     }
 
     fun profile(signals: List<RecommendationSignal>, currentHour: Int, now: Instant): Pair<List<RecommendationAffinityResponse>, List<RecommendationTimePreferenceResponse>> {
@@ -124,24 +160,88 @@ class ContextualRanker {
         }
     }
 
-    private fun diversify(scored: List<RankedPost>): List<RankedPost> {
+    /**
+     * Çok hedefli yeniden sıralama: ilgi, çeşitlilik, güvenlik ve üretici
+     * adaleti.
+     *
+     * Açgözlü seçim; her adımda kalan adaylar arasından hedeflerin toplamı en
+     * yüksek olanı alıyor. Tek geçişte sıralamak yetmez çünkü çeşitlilik ve
+     * adalet cezaları **o ana kadar seçilenlere** bağlı.
+     */
+    private fun diversify(
+        scored: List<RankedPost>,
+        objectives: RankingObjectives,
+        affinities: Map<String, Affinity>,
+    ): List<RankedPost> {
         val remaining = scored.sortedByDescending(RankedPost::score).toMutableList()
         val selected = mutableListOf<RankedPost>()
+        val perCreator = mutableMapOf<UUID, Int>()
+
         while (remaining.isNotEmpty()) {
             val best = remaining.maxBy { candidate ->
-                val sameAuthor = selected.count { it.details.post.ownerId == candidate.details.post.ownerId }
-                val candidateTokens = ContentFeatures.from(candidate.details).keys.filter { it.startsWith("topic:") || it.startsWith("token:") }.toSet()
+                val ownerId = candidate.details.post.ownerId
+                val sameAuthor = perCreator[ownerId] ?: 0
+                val candidateTokens = ContentFeatures.from(candidate.details).keys
+                    .filter { it.startsWith("topic:") || it.startsWith("token:") }
+                    .toSet()
                 val maxOverlap = selected.maxOfOrNull { previous ->
                     val previousTokens = ContentFeatures.from(previous.details).keys.toSet()
-                    if (candidateTokens.isEmpty()) 0.0 else candidateTokens.intersect(previousTokens).size.toDouble() / candidateTokens.size
+                    if (candidateTokens.isEmpty()) {
+                        0.0
+                    } else {
+                        candidateTokens.intersect(previousTokens).size.toDouble() / candidateTokens.size
+                    }
                 } ?: 0.0
-                candidate.score - sameAuthor * 0.55 - maxOverlap * 0.25
+
+                candidate.score -
+                    sameAuthor * objectives.authorPenalty -
+                    maxOverlap * objectives.topicOverlapPenalty -
+                    safetyPenalty(candidate, affinities, objectives) -
+                    creatorCapPenalty(sameAuthor, objectives)
             }
             selected += best
+            perCreator[best.details.post.ownerId] = (perCreator[best.details.post.ownerId] ?: 0) + 1
             remaining -= best
         }
         return selected
     }
+
+    /**
+     * Güvenlik: kullanıcının daha önce gizlediği ya da şikâyet ettiği içeriğe
+     * benzeyen adayları bastırır.
+     *
+     * Olumsuz yakınlık zaten kişiselleştirme bileşenine giriyor, ama orada
+     * doğrusal: yeterince taze ve popüler bir gönderi güçlü bir olumsuz
+     * sinyali dengeleyip yine üste çıkabiliyor. Eşiği geçen olumsuzluk bu
+     * yüzden ayrıca ve sert cezalandırılıyor.
+     */
+    private fun safetyPenalty(
+        candidate: RankedPost,
+        affinities: Map<String, Affinity>,
+        objectives: RankingObjectives,
+    ): Double {
+        if (objectives.safetyPenalty <= 0.0) return 0.0
+        val worst = ContentFeatures.from(candidate.details).keys
+            .filter { it.startsWith("topic:") || it.startsWith("creator:") }
+            .minOfOrNull { key -> affinities[key]?.score ?: 0.0 }
+            ?: 0.0
+        return if (worst < objectives.safetyThreshold) objectives.safetyPenalty else 0.0
+    }
+
+    /**
+     * Üretici adaleti: bir sayfada aynı üreticiye ayrılan slot sayısını
+     * sınırlar.
+     *
+     * Yazar cezası doğrusal ve yeterince yüksek puanlı bir üretici tarafından
+     * aşılabiliyor; üst sınır ise aşılamıyor. İkisi farklı işler yapıyor,
+     * biri diğerinin yerini tutmuyor.
+     */
+    private fun creatorCapPenalty(alreadySelected: Int, objectives: RankingObjectives): Double =
+        if (objectives.creatorCap > 0 && alreadySelected >= objectives.creatorCap) {
+            objectives.creatorCapPenalty
+        } else {
+            0.0
+        }
 
     private fun explanation(best: Pair<String, Double>?, coldStart: Boolean): String {
         if (coldStart || best == null || best.second <= 0) return "Yeni ve toplulukta ilgi gören içerik"
