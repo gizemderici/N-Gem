@@ -12,6 +12,7 @@ import com.nexi.recommendations.FeedRecommendationContext
 import com.nexi.recommendations.RecommendationConsent
 import com.nexi.recommendations.ConsentRepository
 import com.nexi.recommendations.RecommendationEvent
+import com.nexi.recommendations.RecommendationExport
 import com.nexi.recommendations.RecommendationProfileStats
 import com.nexi.recommendations.RecommendationRepository
 import com.nexi.recommendations.RecommendationSignal
@@ -215,5 +216,7 @@ private object AvailableRecommendationRepository : RecommendationRepository {
     override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?) = emptyList<RecommendationSignal>()
     override fun profileStats(userId: UUID) = RecommendationProfileStats(0, null)
     override fun clear(userId: UUID) = Unit
+    override fun export(userId: UUID) = RecommendationExport()
+    override fun deleteOlderThan(cutoff: Instant, batchSize: Int) = 0
     override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }

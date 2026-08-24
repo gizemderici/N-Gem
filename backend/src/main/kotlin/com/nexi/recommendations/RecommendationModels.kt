@@ -157,6 +157,31 @@ data class RecommendationProfileStats(
     val lastUpdatedAt: Instant?,
 )
 
+/**
+ * Kullanıcının indirebileceği öneri verisinin tamamı.
+ *
+ * Satırlar alan adı → metin eşlemesi olarak taşınıyor; her tablo için ayrı
+ * bir veri sınıfı tanımlamak, şema değiştiğinde dışa aktarmayı sessizce
+ * eksik bırakma riski demekti.
+ */
+@Serializable
+data class RecommendationExport(
+    val events: List<Map<String, String?>> = emptyList(),
+    val feedRequests: List<Map<String, String?>> = emptyList(),
+    val featureSnapshots: List<Map<String, String?>> = emptyList(),
+    val hiddenPosts: List<Map<String, String?>> = emptyList(),
+)
+
+/** Dışa aktarma yanıtı; ham satırların yanında ne olduklarını da anlatır. */
+@Serializable
+data class RecommendationExportResponse(
+    val exportedAt: String,
+    val contractVersion: Int,
+    val consent: ConsentResponse,
+    val counts: Map<String, Int>,
+    val data: RecommendationExport,
+)
+
 data class FeedRecommendationContext(
     val localHour: Int,
     val timezoneOffsetMinutes: Int,

@@ -18,6 +18,14 @@ data class AppConfig(
     /** Bu süreden eski bildirimler temizlenir. */
     val notificationRetentionDays: Long = 30,
     /**
+     * Bu süreden eski öneri olayları ve akış soy kütüğü temizlenir.
+     *
+     * Süresiz saklamak hem KVKK/GDPR saklama sınırı ilkesine aykırı hem de
+     * eğitim setine yıllar önceki davranışı sokar; kullanıcının iki yıl
+     * önceki ilgisi bugünkü akışını belirlememeli.
+     */
+    val recommendationRetentionDays: Long = 180,
+    /**
      * Akış deneyi. `enabled = false` tek ayarla her şeyi kronolojiğe döndüren
      * öldürme anahtarı; model hatası fark edildiğinde yeni sürüm beklemek
      * zorunda kalmamak gerekir.
@@ -66,6 +74,7 @@ data class AppConfig(
                 trustProxyHeaders = env.boolean("TRUST_PROXY_HEADERS", false),
                 abandonedUploadTtlHours = env.long("ABANDONED_UPLOAD_TTL_HOURS", 24),
                 notificationRetentionDays = env.long("NOTIFICATION_RETENTION_DAYS", 30),
+                recommendationRetentionDays = env.long("RECOMMENDATION_RETENTION_DAYS", 180),
                 feedExperiment = com.nexi.feed.FeedExperimentConfig.parse(
                     raw = env["FEED_EXPERIMENT"],
                     // Öldürme anahtarı: `false` her kullanıcıyı kronolojiğe alır.

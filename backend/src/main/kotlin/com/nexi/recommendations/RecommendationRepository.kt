@@ -16,7 +16,29 @@ interface RecommendationRepository {
      */
     fun recentSignals(userId: UUID, limit: Int, notAfter: Instant? = null): List<RecommendationSignal>
     fun profileStats(userId: UUID): RecommendationProfileStats
+
+    /**
+     * Kullanıcının öğrenilmiş profilini **tamamen** siler: olaylar, profil
+     * anlık görüntüleri ve akış soy kütüğü.
+     *
+     * Yalnızca olayları silmek yetmiyordu; kullanıcı profilini sıfırladığında
+     * `feed_requests` ve `user_feature_snapshots` yerinde kalıyor, yani
+     * "sildim" dediği veri hâlâ eğitim setine giriyordu.
+     *
+     * Gizlenen gönderiler (`hidden_posts`) kasıtlı olarak silinmiyor: o bir
+     * öğrenilmiş profil değil, kullanıcının açık tercihi. Sıfırlamayla
+     * silinseydi gizlediği içerik akışa geri dönerdi.
+     */
     fun clear(userId: UUID)
+
+    /** Kullanıcının indirebileceği öneri verisinin tamamı. */
+    fun export(userId: UUID): RecommendationExport
+
+    /**
+     * Saklama süresi geçmiş olayları ve soy kütüğünü siler; silinen satır
+     * sayısını döndürür. Toplu iş süpürme döngüsünden çağrılıyor.
+     */
+    fun deleteOlderThan(cutoff: Instant, batchSize: Int): Int
 
     /** Kullanıcının gizlediği gönderi; bir daha aday havuzuna girmez. */
     fun hide(userId: UUID, postId: UUID, now: Instant)
@@ -28,6 +50,8 @@ object EmptyRecommendationRepository : RecommendationRepository {
     override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?) = emptyList<RecommendationSignal>()
     override fun profileStats(userId: UUID) = RecommendationProfileStats(0, null)
     override fun clear(userId: UUID) = Unit
+    override fun export(userId: UUID) = RecommendationExport()
+    override fun deleteOlderThan(cutoff: Instant, batchSize: Int) = 0
     override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }
 
@@ -159,13 +183,107 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
 
     override fun clear(userId: UUID) {
         dataSource.connection.use { connection ->
-            connection.prepareStatement("DELETE FROM recommendation_events WHERE user_id = ?").use { statement ->
-                statement.setObject(1, userId)
-                statement.executeUpdate()
+            connection.autoCommit = false
+            try {
+                // `feed_candidates` ve `user_feature_snapshots`,
+                // `feed_requests`'e ON DELETE CASCADE bağlı; kökü silmek
+                // ikisini de götürüyor.
+                listOf(
+                    "DELETE FROM recommendation_events WHERE user_id = ?",
+                    "DELETE FROM feed_requests WHERE user_id = ?",
+                ).forEach { sql ->
+                    connection.prepareStatement(sql).use { statement ->
+                        statement.setObject(1, userId)
+                        statement.executeUpdate()
+                    }
+                }
+                connection.commit()
+            } catch (error: Throwable) {
+                connection.rollback()
+                throw error
+            } finally {
+                connection.autoCommit = true
             }
         }
     }
+
+    override fun export(userId: UUID): RecommendationExport = dataSource.connection.use { connection ->
+        RecommendationExport(
+            events = connection.rows(
+                """SELECT event_type, post_id, surface, position, dwell_millis, completion_ratio,
+                          local_hour, timezone_offset_minutes, target_feature, candidate_source,
+                          schema_version, app_version, platform, occurred_at
+                   FROM recommendation_events WHERE user_id = ?
+                   ORDER BY occurred_at""",
+                userId,
+            ),
+            feedRequests = connection.rows(
+                """SELECT id, requested_at, model_version, policy_version, feature_version,
+                          experiment_variant, local_hour, personalized, candidate_count, returned_count
+                   FROM feed_requests WHERE user_id = ? AND shadow_of IS NULL
+                   ORDER BY requested_at""",
+                userId,
+            ),
+            featureSnapshots = connection.rows(
+                """SELECT feed_request_id, feature_version, captured_at, affinities, signal_count
+                   FROM user_feature_snapshots WHERE user_id = ?
+                   ORDER BY captured_at""",
+                userId,
+            ),
+            hiddenPosts = connection.rows(
+                "SELECT post_id, created_at FROM hidden_posts WHERE user_id = ? ORDER BY created_at",
+                userId,
+            ),
+        )
+    }
+
+    /**
+     * Saklama süresi silme işlemi partiler hâlinde yapılır: tek bir
+     * `DELETE` milyonlarca satırı kilitleyip süpürme döngüsünü bloke ederdi.
+     */
+    override fun deleteOlderThan(cutoff: Instant, batchSize: Int): Int = dataSource.connection.use { connection ->
+        var removed = 0
+        listOf(
+            """DELETE FROM recommendation_events WHERE id IN (
+                   SELECT id FROM recommendation_events WHERE received_at < ? LIMIT ?
+               )""",
+            """DELETE FROM feed_requests WHERE id IN (
+                   SELECT id FROM feed_requests WHERE requested_at < ? LIMIT ?
+               )""",
+        ).forEach { sql ->
+            connection.prepareStatement(sql).use { statement ->
+                statement.setTimestamp(1, Timestamp.from(cutoff))
+                statement.setInt(2, batchSize)
+                removed += statement.executeUpdate()
+            }
+        }
+        removed
+    }
 }
+
+/**
+ * Satırları alan adı → metin eşlemesi olarak okur.
+ *
+ * Dışa aktarma her tablo için ayrı bir veri sınıfı gerektirmiyor: çıktı
+ * kullanıcının indireceği JSON, ve şema değiştiğinde burayı da güncellemek
+ * zorunda kalmak dışa aktarmayı sessizce eksik bırakma riski taşırdı.
+ */
+private fun java.sql.Connection.rows(sql: String, userId: UUID): List<Map<String, String?>> =
+    prepareStatement(sql).use { statement ->
+        statement.setObject(1, userId)
+        statement.executeQuery().use { results ->
+            val meta = results.metaData
+            buildList {
+                while (results.next()) {
+                    add(
+                        (1..meta.columnCount).associate { index ->
+                            meta.getColumnLabel(index) to results.getObject(index)?.toString()
+                        }
+                    )
+                }
+            }
+        }
+    }
 
 /**
  * Konusuz gönderilerde `LEFT JOIN` yüzünden dizi `NULL` gelebilir; sorgudaki

@@ -9,6 +9,7 @@ import com.nexi.posts.PostService
 import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.FeedRecommendationContext
 import com.nexi.recommendations.RecommendationEvent
+import com.nexi.recommendations.RecommendationExport
 import com.nexi.recommendations.RecommendationEventType
 import com.nexi.recommendations.RecommendationProfileStats
 import com.nexi.recommendations.RecommendationRepository
@@ -245,5 +246,7 @@ private class RecordingRepository : RecommendationRepository {
     override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?) = emptyList<RecommendationSignal>()
     override fun profileStats(userId: UUID) = RecommendationProfileStats(written.size.toLong(), null)
     override fun clear(userId: UUID) = written.clear()
+    override fun export(userId: UUID) = RecommendationExport()
+    override fun deleteOlderThan(cutoff: Instant, batchSize: Int) = 0
     override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }

@@ -84,6 +84,7 @@ import java.time.Duration
 private const val HEALTH_CHECK_TIMEOUT_SECONDS = 2
 private val SWEEP_INTERVAL_MILLIS = Duration.ofHours(1).toMillis()
 private const val NOTIFICATION_SWEEP_BATCH = 1_000
+private const val RECOMMENDATION_SWEEP_BATCH = 5_000
 
 private fun clockNow(): java.time.Instant = java.time.Instant.now()
 
@@ -172,6 +173,14 @@ fun Application.module() {
                 val cutoff = clockNow().minus(Duration.ofDays(config.notificationRetentionDays))
                 notificationRepository.deleteOlderThan(cutoff, NOTIFICATION_SWEEP_BATCH)
             }.onFailure { appLogger.warn("Notification retention sweep failed", it) }
+            runCatching {
+                // Saklama sınırı: süresi geçen öneri olayları ve akış soy
+                // kütüğü silinir. Partiler hâlinde, tek bir DELETE milyonlarca
+                // satırı kilitleyip süpürme döngüsünü bloke etmesin diye.
+                val cutoff = clockNow().minus(Duration.ofDays(config.recommendationRetentionDays))
+                val removed = recommendationRepository.deleteOlderThan(cutoff, RECOMMENDATION_SWEEP_BATCH)
+                if (removed > 0) appLogger.info("Recommendation retention sweep removed {} rows", removed)
+            }.onFailure { appLogger.warn("Recommendation retention sweep failed", it) }
             delay(SWEEP_INTERVAL_MILLIS)
         }
     }

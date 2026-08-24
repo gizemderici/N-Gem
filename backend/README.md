@@ -448,12 +448,24 @@ gerektiriyor.
 |---|---|---|
 | `GET` | `/api/v1/recommendations/consent` | Rıza durumu ve kabul edilen sözleşme sürümü |
 | `PUT` | `/api/v1/recommendations/consent` | `{ "granted": true }` |
+| `GET` | `/api/v1/recommendations/export` | Ham öneri verisinin tamamı, JSON |
 
 Kaydı olmayan kullanıcı için varsayılan **rıza yok**: sessizce "açık" saymak
 kullanıcıyı hiç sorulmadan profillemek olurdu. Rıza yokken davranış olayı
 yazılmaz (uç `accepted: 0` döner, hata değil — rızayı geri çekmek istemciyi
 hata döngüsüne sokmamalı), akış kişiselleştirilmez ve soy kütüğü tutulmaz.
 Rıza geri çekildiğinde öğrenilmiş profil de silinir.
+
+Silme, soy kütüğünü de kaldırıyor: `feed_requests` gidince `ON DELETE CASCADE`
+ile `feed_candidates` ve `user_feature_snapshots` da gidiyor. Eskiden yalnızca
+olaylar siliniyordu ve "sildim" denen veri eğitim setine girmeye devam
+ediyordu. `hidden_posts` kasıtlı olarak kalıyor — gizleme öğrenilmiş profil
+değil, açık tercih.
+
+Saklama süresi `RECOMMENDATION_RETENTION_DAYS` (varsayılan 180 gün); süpürme
+döngüsü süresi geçmiş olayları ve soy kütüğünü partiler hâlinde siliyor.
+Ayrıntı ve eğitim verisinden silme politikası [`docs/privacy.md`](docs/privacy.md)
+belgesinde.
 
 ### Gönderi işlemleri
 

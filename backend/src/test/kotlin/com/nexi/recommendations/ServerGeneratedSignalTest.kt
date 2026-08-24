@@ -132,5 +132,7 @@ private class RecordingRecommendationRepository : RecommendationRepository {
     override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?) = emptyList<RecommendationSignal>()
     override fun profileStats(userId: UUID) = RecommendationProfileStats(written.size.toLong(), null)
     override fun clear(userId: UUID) = written.clear()
+    override fun export(userId: UUID) = RecommendationExport()
+    override fun deleteOlderThan(cutoff: Instant, batchSize: Int) = 0
     override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }

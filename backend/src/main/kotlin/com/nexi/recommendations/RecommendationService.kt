@@ -67,6 +67,29 @@ class RecommendationService(
         return MessageResponse("Öğrenilmiş öneri profili sıfırlandı.")
     }
 
+    /**
+     * Kullanıcının kendi öneri verisini indirmesi.
+     *
+     * Profil özeti "ne öğrendik" sorusunu cevaplıyor ama ham veriyi
+     * göstermiyordu; KVKK ve GDPR erişim hakkı özetle değil, kaydın kendisiyle
+     * karşılanır.
+     */
+    fun export(userId: UUID): RecommendationExportResponse {
+        val data = repository.export(userId)
+        return RecommendationExportResponse(
+            exportedAt = clock.instant().toString(),
+            contractVersion = EventContract.CURRENT_VERSION,
+            consent = consents.find(userId).toResponse(),
+            counts = mapOf(
+                "events" to data.events.size,
+                "feedRequests" to data.feedRequests.size,
+                "featureSnapshots" to data.featureSnapshots.size,
+                "hiddenPosts" to data.hiddenPosts.size,
+            ),
+            data = data,
+        )
+    }
+
     fun consent(userId: UUID): ConsentResponse = consents.find(userId).toResponse()
 
     /**

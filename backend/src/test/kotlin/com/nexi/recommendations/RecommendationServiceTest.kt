@@ -213,6 +213,8 @@ private class InMemoryRecommendationRepository : RecommendationRepository {
         events.removeAll { it.userId == userId }
     }
 
+    override fun export(userId: UUID) = RecommendationExport()
+    override fun deleteOlderThan(cutoff: Instant, batchSize: Int) = 0
     override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }
 

@@ -28,6 +28,9 @@ fun Route.recommendationRoutes(service: RecommendationService) {
             delete("/profile") {
                 call.respond(service.reset(call.authenticatedUserId()))
             }
+            get("/export") {
+                call.respond(service.export(call.authenticatedUserId()))
+            }
             get("/consent") {
                 call.respond(service.consent(call.authenticatedUserId()))
             }
