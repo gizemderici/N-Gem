@@ -20,28 +20,39 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 : "${DATABASE_URL:?DATABASE_URL gerekli}"
 PYTHON="${PYTHON:-python3}"
+# psql yerel kurulumda olmayabilir; demo icin compose konteynerine
+# yonlendirilebilsin diye disaridan verilebiliyor.
+PSQL="${PSQL:-psql}"
 
 mkdir -p "$OUTPUT" "$MODELS"
 
-echo "1/5 Soy kütüğünden eğitim seti çıkarılıyor"
-psql "$DATABASE_URL" --csv -v ON_ERROR_STOP=1 \
+# İki ayrı şema, iki ayrı tüketici. Aynı dosyayı ikisine de vermek hattı
+# üçüncü adımda "Eksik kolonlar" hatasıyla öldürüyordu.
+echo "1/5 Soy kütüğünden eğitim seti ve olay akışı çıkarılıyor"
+$PSQL "$DATABASE_URL" --csv -v ON_ERROR_STOP=1 -v window_hours="${LABEL_WINDOW_HOURS:-24}" \
   -f "$LAB/export_training_data.sql" > "$OUTPUT/training-$STAMP.csv"
+$PSQL "$DATABASE_URL" --csv -v ON_ERROR_STOP=1 \
+  -f "$LAB/export_events.sql" > "$OUTPUT/events-$STAMP.csv"
 
 rows="$(($(wc -l < "$OUTPUT/training-$STAMP.csv") - 1))"
+events="$(($(wc -l < "$OUTPUT/events-$STAMP.csv") - 1))"
 if [ "$rows" -lt "${MIN_TRAINING_ROWS:-1000}" ]; then
   # Az veriyle eğitilmiş bir model gürültü öğrenir; hattı burada durdurmak
   # onu üretime taşımaktan iyi.
-  echo "Eğitim verisi yetersiz: $rows satır" >&2
+  echo "Eğitim verisi yetersiz: $rows satır (en az ${MIN_TRAINING_ROWS:-1000})" >&2
   exit 2
 fi
-echo "    $rows satır"
+echo "    $rows eğitim satırı, $events olay"
 
 echo "2/5 Model eğitiliyor"
+# Surum kayit defterinin anahtari; damgayla birlikte veriliyor ki her kosu
+# ayri bir kayit olusun. Sabit birakilirsa her egitim bir oncekini eziyor.
 "$PYTHON" "$LAB/train_ranker.py" "$OUTPUT/training-$STAMP.csv" \
-  --output "$MODELS/nexi-lr-$STAMP.json"
+  --output "$MODELS/${MODEL_NAME:-nexi-lr}-$STAMP.json" \
+  --model-version "${MODEL_NAME:-nexi-lr}-$STAMP"
 
 echo "3/5 Çevrimdışı değerlendirme"
-"$PYTHON" "$LAB/offline_evaluate.py" "$OUTPUT/training-$STAMP.csv" \
+"$PYTHON" "$LAB/offline_evaluate.py" "$OUTPUT/events-$STAMP.csv" \
   --k 10 --output "$OUTPUT/metrics-$STAMP.json"
 
 echo "4/5 Kayma kontrolü"
@@ -56,7 +67,7 @@ else
 fi
 
 echo "5/5 Kayıt defterine ekleniyor"
-"$PYTHON" "$LAB/registry.py" register "$MODELS/nexi-lr-$STAMP.json" \
+"$PYTHON" "$LAB/registry.py" register "$MODELS/${MODEL_NAME:-nexi-lr}-$STAMP.json" \
   --metrics "$OUTPUT/metrics-$STAMP.json"
 
 cat <<EOF
@@ -64,7 +75,7 @@ cat <<EOF
 Hat tamamlandı. Model 'candidate' aşamasında.
 
 Sonraki adımlar elle:
-  python registry.py promote nexi-lr-$STAMP --to shadow
+  python registry.py promote ${MODEL_NAME:-nexi-lr}-$STAMP --to shadow
   # gölgede karşılaştır: psql -f experiment_report.sql
-  python registry.py promote nexi-lr-$STAMP --to production
+  python registry.py promote ${MODEL_NAME:-nexi-lr}-$STAMP --to production
 EOF

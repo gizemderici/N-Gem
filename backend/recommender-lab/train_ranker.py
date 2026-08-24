@@ -153,9 +153,16 @@ def build_model(
     row_count: int,
     data_checksum: str,
     data_name: str,
+    model_version: str = MODEL_VERSION,
 ) -> dict[str, object]:
+    """Model dosyasi.
+
+    `model_version` kayit defterinin anahtari. Sabit birakilirsa her egitim
+    koşusu bir oncekinin defter kaydini eziyor ve iki surumu ayni anda
+    tutmak imkansiz hale geliyor.
+    """
     return {
-        "model_version": MODEL_VERSION,
+        "model_version": model_version,
         "feature_version": FEATURE_VERSION,
         "trained_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "data": {"name": data_name, "sha256": data_checksum, "rows": row_count},
@@ -177,13 +184,24 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=TrainingSettings.learning_rate)
     parser.add_argument("--epochs", type=int, default=TrainingSettings.epochs)
     parser.add_argument("--l2", type=float, default=TrainingSettings.l2)
+    parser.add_argument(
+        "--model-version",
+        default=MODEL_VERSION,
+        help="Kayit defterinin anahtari; her kosu icin ayri olmali.",
+    )
     args = parser.parse_args()
 
     settings = TrainingSettings(learning_rate=args.learning_rate, epochs=args.epochs, l2=args.l2)
     rows = load_rows(args.training)
     weights, metrics = train(rows, settings)
     model = build_model(
-        weights, metrics, settings, len(rows), checksum(args.training), args.training.name
+        weights,
+        metrics,
+        settings,
+        len(rows),
+        checksum(args.training),
+        args.training.name,
+        model_version=args.model_version,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

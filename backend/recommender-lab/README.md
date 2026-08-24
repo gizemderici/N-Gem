@@ -240,3 +240,40 @@ psql "$DATABASE_URL" -v hours=24 -f model_health.sql
 Sürüm başına p50/p95 gecikme, aday ve dönen sayıları; yedeğe düşme oranı
 sebebe göre; saatlik hata eğrisi. `RANKING_ERROR` sıfırdan farklıysa alarm,
 diğer sebepler beklenen durumlar.
+
+### İki ayrı CSV şeması
+
+Eğitim ve değerlendirme farklı sorular soruyor, o yüzden girdileri de ayrı:
+
+| Dosya | Tüketici | İçerik |
+|---|---|---|
+| `export_training_data.sql` | `train_ranker.py` | Her satır sunulmuş bir aday + etiketi; özellikler istek anında dondurulmuş |
+| `export_events.sql` | `offline_evaluate.py` | Ham etkileşim akışı; aday havuzunu ve zaman ayrımını değerlendirici kendisi kuruyor |
+
+Aynı dosyayı ikisine de vermek hattı üçüncü adımda
+`Eksik kolonlar: event_type, item_id, timestamp, user_id` ile öldürüyordu.
+
+### Etiket penceresi ve atıf
+
+`LABEL_WINDOW_HOURS` (varsayılan **24**). Etkileşim gösterimden bu kadar saat
+içinde gelmezse etiketlenmiyor — üst sınır yokken bir aylık beğeni, o
+gönderinin bütün geçmiş gösterimlerini olumlu etiketliyordu.
+
+Her etkileşim **tek** bir gösterime atfediliyor: kendisinden önceki en yakın
+olana. Aynı gönderi sabah ve akşam gösterilip akşam beğenilirse sabahki
+gösterim etiketlenmiyor; aksi hâlde model "bu içerik sabah da iyi gitti" diye
+öğrenirdi. Kuralları `TrainingExportIntegrationTest` gerçek SQL üzerinde
+doğruluyor.
+
+### Yerel demoda tek komutla
+
+```bash
+DATABASE_URL="postgres://nexi@localhost/nexi" \
+  MIN_TRAINING_ROWS=100 MODEL_NAME=nexi-lr-demo \
+  ./run_pipeline.sh
+```
+
+`PSQL` ve `PYTHON` değişkenleriyle yorumlayıcılar dışarıdan verilebilir;
+`psql` yerel kurulumda yoksa compose konteynerine yönlendirilebilir.
+`--model-version` her koşuya ayrı bir kayıt defteri anahtarı veriyor — sabit
+bırakılırsa her eğitim bir öncekinin kaydını eziyordu.
