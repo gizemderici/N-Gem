@@ -58,10 +58,12 @@ class PostServiceTest {
     }
 
     @Test
-    fun `feed has cursor and interaction state is viewer specific`() {
+    fun `own post list has a cursor and interaction state is viewer specific`() {
+        // Akış sayfalaması artık FeedPolicy'nin işi; burada kalan kronolojik
+        // liste profil ekranınınki.
         repeat(3) { service.create(ownerId, CreatePostRequest("Gönderi $it")) }
 
-        val firstPage = service.feed(ownerId, null, 2)
+        val firstPage = service.postsByOwner(ownerId, ownerId, null, 2)
         assertEquals(2, firstPage.items.size)
         assertNotNull(firstPage.nextCursor)
 

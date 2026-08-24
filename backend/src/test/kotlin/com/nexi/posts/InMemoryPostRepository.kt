@@ -22,6 +22,7 @@ internal class InMemoryPostRepository(
     private val postTopics = mutableMapOf<UUID, List<UUID>>()
     private val likes = mutableSetOf<Pair<UUID, UUID>>()
     private val saves = mutableSetOf<Pair<UUID, UUID>>()
+    private val hidden = mutableSetOf<Pair<UUID, UUID>>()
 
     /** (takip eden, takip edilen) — akış katmanı testleri için. */
     val follows = mutableSetOf<Pair<UUID, UUID>>()
@@ -70,27 +71,30 @@ internal class InMemoryPostRepository(
                 .map { details(it, viewerId) }
         )
 
-    override fun feedTier(
+    override fun candidates(
         viewerId: UUID,
-        tier: FeedTier,
+        source: CandidateSource,
         priorityTopicCount: Int,
-        cursor: FeedCursor?,
+        notAfter: Instant,
         limit: Int,
     ): List<PostDetails> {
         val positions = topicRepository.userTopics(viewerId).associate { it.topic.id to it.position }
         val relatedIds = topicRepository.relationsFor(positions.keys.toList()).map { it.relatedTopicId }.toSet()
 
         return published()
+            .filter { it.createdAt <= notAfter }
+            .filter { viewerId to it.id !in hidden }
             .filter {
-                tierOf(
+                matchesSource(
+                    source = source,
+                    post = it,
                     topicIds = postTopics[it.id].orEmpty(),
                     positions = positions,
                     relatedIds = relatedIds,
                     priorityTopicCount = priorityTopicCount,
-                    followsAuthor = viewerId to it.ownerId in follows,
-                ) == tier
+                    viewerId = viewerId,
+                )
             }
-            .afterCursor(cursor)
             .take(limit)
             .map { details(it, viewerId) }
     }
@@ -170,21 +174,42 @@ internal class InMemoryPostRepository(
         .replace("ü", "u").replace("ö", "o").replace("ç", "c")
 
     /** JdbcPostRepository'deki dışlayıcı katman koşullarının bellek içi karşılığı. */
-    private fun tierOf(
+    private fun matchesSource(
+        source: CandidateSource,
+        post: Post,
         topicIds: List<UUID>,
         positions: Map<UUID, Int>,
         relatedIds: Set<UUID>,
         priorityTopicCount: Int,
-        followsAuthor: Boolean,
-    ): FeedTier {
+        viewerId: UUID,
+    ): Boolean {
+        val followsAuthor = viewerId to post.ownerId in follows
         val selectedPositions = topicIds.mapNotNull { positions[it] }
-        return when {
-            followsAuthor -> FeedTier.FOLLOWING
-            selectedPositions.any { it < priorityTopicCount } -> FeedTier.PRIORITY_TOPIC
-            selectedPositions.isNotEmpty() -> FeedTier.OTHER_TOPIC
-            topicIds.any { it in relatedIds } -> FeedTier.RELATED_TOPIC
-            else -> FeedTier.DISCOVERY
+        val priority = selectedPositions.any { it < priorityTopicCount }
+        val anySelected = selectedPositions.isNotEmpty()
+        val anyRelated = topicIds.any { it in relatedIds }
+        // Yorum sayacı bellek içi depoda yok; etkileşim yalnızca beğeniden.
+        val engagement = likes.count { it.first == post.id }
+        val followerCount = follows.count { it.second == post.ownerId }
+
+        // JdbcPostRepository.sourceClause ile aynı koşullar; POPULAR ve
+        // NEW_CREATOR bilerek dışlayıcı değil, çakışmayı çağıran tekilleştirir.
+        return when (source) {
+            CandidateSource.FOLLOWING -> followsAuthor
+            CandidateSource.PRIORITY_TOPIC -> !followsAuthor && priority
+            CandidateSource.OTHER_TOPIC -> !followsAuthor && anySelected && !priority
+            CandidateSource.RELATED_TOPIC -> !followsAuthor && !anySelected && anyRelated
+            CandidateSource.POPULAR ->
+                !followsAuthor && engagement >= POPULAR_MIN_ENGAGEMENT
+            CandidateSource.NEW_CREATOR ->
+                !followsAuthor && followerCount <= NEW_CREATOR_MAX_FOLLOWERS
+            CandidateSource.DISCOVERY -> !followsAuthor && !anySelected && !anyRelated
         }
+    }
+
+    /** Test tarafında gizleme; `hidden_posts` tablosunun karşılığı. */
+    fun hide(viewerId: UUID, postId: UUID) {
+        hidden += viewerId to postId
     }
 
     private fun published(): List<Post> = posts.values

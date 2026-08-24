@@ -18,11 +18,18 @@ enum class PostStatus { PUBLISHED, DELETED }
  * Bir gönderinin, kullanıcının ilgi sıralamasına göre hangi katmandan geldiği.
  * Katmanlar dışlayıcıdır: bir gönderi akışta yalnızca tek bir katmana düşer.
  */
-enum class FeedTier {
+/**
+ * Bir gönderinin akışa hangi gerekçeyle aday olduğu.
+ *
+ * Sıra aynı zamanda önceliktir: bir gönderi birden çok kaynaktan gelebilir,
+ * tekilleştirmede listedeki ilk kaynak kazanır. Bu etiket sunum kaydına
+ * yazılır; akışın neden o sırayla oluştuğu sonradan ancak böyle açıklanabilir.
+ */
+enum class CandidateSource {
     /**
      * Yazarı görüntüleyen tarafından takip ediliyor. En güçlü sinyal olduğu
      * için konu eşleşmesinden önce gelir: takip ettiğin birinin gönderisi,
-     * konusu ne olursa olsun bu katmana düşer.
+     * konusu ne olursa olsun bu kaynağa düşer.
      */
     FOLLOWING,
 
@@ -35,7 +42,19 @@ enum class FeedTier {
     /** Seçilen konularla ilişkili (komşu) bir konu. */
     RELATED_TOPIC,
 
-    /** Seçimlerin tamamen dışında kalan keşif içeriği. */
+    /** Toplulukta ilgi görmüş içerik; konu eşleşmesinden bağımsız. */
+    POPULAR,
+
+    /**
+     * Az takipçili üreticinin gönderisi.
+     *
+     * Kendi başına bir aday kaynağı olmasa yeni üretici hiçbir zaman
+     * görünmez: popülerlik ve takip sinyalleri zaten görünür olanı
+     * güçlendirir.
+     */
+    NEW_CREATOR,
+
+    /** Yukarıdakilerin hiçbirine girmeyen keşif içeriği. */
     DISCOVERY,
 }
 
@@ -115,6 +134,12 @@ data class PostResponse(
     val savedByMe: Boolean,
     val createdAt: String,
     val recommendationReason: String? = null,
+    /**
+     * Gönderinin akışa hangi gerekçeyle aday olduğu ([CandidateSource]).
+     * Yalnızca kişiselleştirilmiş akışta dolu; sıralamanın neden o şekilde
+     * oluştuğunu istemci tarafında da açıklanabilir kılıyor.
+     */
+    val candidateSource: String? = null,
 )
 
 @Serializable

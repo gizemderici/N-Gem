@@ -14,7 +14,7 @@ import com.nexi.comments.JdbcCommentRepository
 import com.nexi.comments.commentRoutes
 import com.nexi.config.AppConfig
 import com.nexi.config.DatabaseFactory
-import com.nexi.feed.FeedService
+import com.nexi.feed.FeedPolicy
 import com.nexi.feed.feedRoutes
 import com.nexi.media.JdbcMediaRepository
 import com.nexi.media.MediaJanitor
@@ -114,7 +114,6 @@ fun Application.module() {
         repository = postRepository,
         storage = objectStorage,
         recommendationRepository = recommendationRepository,
-        ranker = ranker,
         notifications = notificationService,
     )
     val recommendationService = RecommendationService(
@@ -142,7 +141,8 @@ fun Application.module() {
     )
     val searchService = SearchService(postRepository, JdbcSearchRepository(dataSource), objectStorage)
     val topicService = TopicService(topicRepository)
-    val feedService = FeedService(postRepository, topicRepository, objectStorage)
+    // Akisin tek politikasi; hem /api/v1/feed hem /api/v1/posts/feed buna bagli.
+    val feedPolicy = FeedPolicy(postRepository, recommendationRepository, ranker, objectStorage)
     val authThrottle = AuthThrottle(trustProxyHeaders = config.trustProxyHeaders)
 
     val janitor = MediaJanitor(mediaRepository, objectStorage)
@@ -236,7 +236,7 @@ fun Application.module() {
         }
         authRoutes(authService, authThrottle)
         mediaRoutes(mediaService)
-        postRoutes(postService)
+        postRoutes(postService, feedPolicy)
         recommendationRoutes(recommendationService)
         commentRoutes(commentService)
         // Profil yolları `/users/{username}` desenini kullanıyor; `/users/me`
@@ -249,6 +249,6 @@ fun Application.module() {
         // Arama sorgulari pahali; dakikada 30 istekle sinirli.
         searchRoutes(searchService, RequestRateLimiter(maximumAttempts = 30))
         topicRoutes(topicService)
-        feedRoutes(feedService)
+        feedRoutes(feedPolicy)
     }
 }

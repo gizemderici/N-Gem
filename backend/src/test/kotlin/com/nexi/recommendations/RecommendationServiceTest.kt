@@ -1,8 +1,8 @@
 package com.nexi.recommendations
 
 import com.nexi.auth.ApiException
+import com.nexi.posts.CandidateSource
 import com.nexi.posts.FeedCursor
-import com.nexi.posts.FeedTier
 import com.nexi.posts.Post
 import com.nexi.posts.PostDetails
 import com.nexi.posts.PostRepository
@@ -185,7 +185,7 @@ private class InMemoryRecommendationRepository : RecommendationRepository {
         return fresh.size
     }
 
-    override fun recentSignals(userId: UUID, limit: Int): List<RecommendationSignal> = events
+    override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?): List<RecommendationSignal> = events
         .filter { it.userId == userId }
         .sortedByDescending(RecommendationEvent::occurredAt)
         .take(limit)
@@ -212,6 +212,8 @@ private class InMemoryRecommendationRepository : RecommendationRepository {
     override fun clear(userId: UUID) {
         events.removeAll { it.userId == userId }
     }
+
+    override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }
 
 private object EmptyPostRepository : PostRepository {
@@ -230,11 +232,11 @@ private object EmptyPostRepository : PostRepository {
         cursor: FeedCursor?,
         limit: Int,
     ): List<PostDetails> = unsupported()
-    override fun feedTier(
+    override fun candidates(
         viewerId: UUID,
-        tier: FeedTier,
+        source: CandidateSource,
         priorityTopicCount: Int,
-        cursor: FeedCursor?,
+        notAfter: Instant,
         limit: Int,
     ): List<PostDetails> = unsupported()
     override fun hydrate(details: List<PostDetails>): List<PostDetails> = unsupported()

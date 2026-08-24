@@ -27,11 +27,18 @@ interface PostRepository {
      * Tek bir akış katmanının kronolojik sayfası. Medya ve konular yüklenmez;
      * karışım kurulduktan sonra yalnızca sayfaya giren gönderiler için [hydrate] çağrılır.
      */
-    fun feedTier(
+    /**
+     * Tek bir aday kaynağından gönderi getirir.
+     *
+     * `notAfter` aday kümesini sayfalama boyunca dondurur; engellenen ve
+     * kullanıcının gizlediği gönderiler sorgunun içinde elenir, yani hiçbir
+     * havuza girmezler.
+     */
+    fun candidates(
         viewerId: UUID,
-        tier: FeedTier,
+        source: CandidateSource,
         priorityTopicCount: Int,
-        cursor: FeedCursor?,
+        notAfter: Instant,
         limit: Int,
     ): List<PostDetails>
 
@@ -70,6 +77,18 @@ data class RankedPostCursor(val rank: Double, val createdAt: Instant, val id: UU
 /** Keşfet güncellik puanının bir haftalık yarılanma süresi. */
 internal const val EXPLORE_HALF_LIFE_SECONDS = 604_800.0
 
+/**
+ * Bir gönderinin "popüler" sayılması için gereken en az etkileşim.
+ *
+ * Eşik olmadan bu kaynak keşiften ayırt edilemezdi; üç, tek bir arkadaşın
+ * beğenisiyle popüler görünmeyi engelleyecek kadar düşük ama küçük bir
+ * toplulukta ulaşılabilir bir sayı.
+ */
+internal const val POPULAR_MIN_ENGAGEMENT = 3
+
+/** Bu takipçi sayısının altındaki üretici "yeni" sayılır. */
+internal const val NEW_CREATOR_MAX_FOLLOWERS = 5
+
 class MediaOwnershipException : RuntimeException()
 class MediaAlreadyAttachedException : RuntimeException()
 class UnknownTopicException : RuntimeException()
@@ -82,7 +101,6 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
          * yorum sayacındaki engel süzgeci (2), beğeni, kayıt ve takip kontrolü.
          */
         const val VIEWER_BINDINGS = 3 + BlockFilter.BINDINGS
-
     }
 
     override fun create(ownerId: UUID, body: String, mediaIds: List<UUID>, topicIds: List<UUID>, now: Instant): Post {
@@ -196,29 +214,34 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
             }
         }
 
-    override fun feedTier(
+    override fun candidates(
         viewerId: UUID,
-        tier: FeedTier,
+        source: CandidateSource,
         priorityTopicCount: Int,
-        cursor: FeedCursor?,
+        notAfter: Instant,
         limit: Int,
     ): List<PostDetails> = dataSource.connection.use { connection ->
         val bindings = MutableList<Any>(VIEWER_BINDINGS) { viewerId }
-        // Engel süzgeci tier koşulundan önce geliyor; SQL'deki sıra da öyle.
+        // Engel süzgeci kaynak koşulundan önce geliyor; SQL'deki sıra da öyle.
         val blockClause = BlockFilter.notBlocked("p.owner_id")
         repeat(BlockFilter.BINDINGS) { bindings += viewerId }
-        val tierClause = tierClause(tier, viewerId, priorityTopicCount, bindings)
-        val cursorClause = if (cursor == null) {
-            ""
-        } else {
-            bindings += Timestamp.from(cursor.createdAt)
-            bindings += cursor.id
-            "AND (p.created_at, p.id) < (?, ?)"
-        }
+
+        // Gizlenen gönderi hiçbir aday havuzuna girmemeli. Süzgeç sıralamadan
+        // önce, sorgunun içinde: sonradan elemek sayfa boyutunu bozardı.
+        bindings += viewerId
+        val hiddenClause = "NOT EXISTS (SELECT 1 FROM hidden_posts hp WHERE hp.user_id = ? AND hp.post_id = p.id)"
+
+        // Sayfalama boyunca aday kümesi sabit kalmalı; sonradan yazılan
+        // gönderiler ikinci sayfada araya girip sırayı kaydırırdı.
+        bindings += Timestamp.from(notAfter)
+        val freezeClause = "p.created_at <= ?"
+
+        val sourceClause = sourceClause(source, viewerId, priorityTopicCount, bindings)
         bindings += limit
 
         connection.prepareStatement(
-            "${detailsSelect()} WHERE p.status = 'PUBLISHED' AND $blockClause AND $tierClause $cursorClause " +
+            "${detailsSelect()} WHERE p.status = 'PUBLISHED' AND $blockClause AND $hiddenClause " +
+                "AND $freezeClause AND $sourceClause " +
                 "ORDER BY p.created_at DESC, p.id DESC LIMIT ?"
         ).use { statement ->
             bindings.forEachIndexed { index, value ->
@@ -372,8 +395,8 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
      * Katman koşulları dışlayıcıdır; alt katmanlar üst katmanlara düşen gönderileri
      * `NOT EXISTS` ile eler, böylece bir gönderi akışta iki kez görünmez.
      */
-    private fun tierClause(
-        tier: FeedTier,
+    private fun sourceClause(
+        source: CandidateSource,
         viewerId: UUID,
         priorityTopicCount: Int,
         bindings: MutableList<Any>,
@@ -404,14 +427,27 @@ class JdbcPostRepository(private val dataSource: DataSource) : PostRepository {
             return "EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followee_id = p.owner_id)"
         }
 
-        // Takip en üstte: alt katmanların hepsi "takip edilmiyor" koşulunu ekler,
-        // yoksa takip ettiğin birinin gönderisi hem burada hem konu katmanında çıkardı.
-        return when (tier) {
-            FeedTier.FOLLOWING -> followed()
-            FeedTier.PRIORITY_TOPIC -> "NOT ${followed()} AND ${selected("<")}"
-            FeedTier.OTHER_TOPIC -> "NOT ${followed()} AND ${selected(">=")} AND NOT ${selected("<")}"
-            FeedTier.RELATED_TOPIC -> "NOT ${followed()} AND NOT ${anySelected()} AND ${anyRelated()}"
-            FeedTier.DISCOVERY -> "NOT ${followed()} AND NOT ${anySelected()} AND NOT ${anyRelated()}"
+        fun engagement(): String =
+            """((SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)
+              + (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id AND c.status = 'PUBLISHED'))"""
+
+        fun followerCount(): String = "(SELECT COUNT(*) FROM follows f2 WHERE f2.followee_id = p.owner_id)"
+
+        // Takip en üstte: konu kaynaklarının hepsi "takip edilmiyor" koşulunu
+        // ekler, yoksa takip ettiğin birinin gönderisi hem burada hem konu
+        // kaynağında çıkardı.
+        //
+        // POPULAR ve NEW_CREATOR bilerek dışlayıcı değil: popüler içerik çoğu
+        // zaman aynı anda konu eşleşmesi de taşır. Çakışmayı tekilleştirme
+        // çözüyor, kaynak önceliği CandidateSource sırasından geliyor.
+        return when (source) {
+            CandidateSource.FOLLOWING -> followed()
+            CandidateSource.PRIORITY_TOPIC -> "NOT ${followed()} AND ${selected("<")}"
+            CandidateSource.OTHER_TOPIC -> "NOT ${followed()} AND ${selected(">=")} AND NOT ${selected("<")}"
+            CandidateSource.RELATED_TOPIC -> "NOT ${followed()} AND NOT ${anySelected()} AND ${anyRelated()}"
+            CandidateSource.POPULAR -> "NOT ${followed()} AND ${engagement()} >= $POPULAR_MIN_ENGAGEMENT"
+            CandidateSource.NEW_CREATOR -> "NOT ${followed()} AND ${followerCount()} <= $NEW_CREATOR_MAX_FOLLOWERS"
+            CandidateSource.DISCOVERY -> "NOT ${followed()} AND NOT ${anySelected()} AND NOT ${anyRelated()}"
         }
     }
 

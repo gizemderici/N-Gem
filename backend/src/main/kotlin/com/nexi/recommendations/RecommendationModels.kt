@@ -1,5 +1,6 @@
 package com.nexi.recommendations
 
+import com.nexi.posts.CandidateSource
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -132,6 +133,8 @@ data class RecommendationEvent(
     val schemaVersion: Int = EventContract.CURRENT_VERSION,
     val appVersion: String? = null,
     val platform: EventPlatform? = null,
+    /** Sunum kaydında gönderinin hangi aday kaynağından geldiği. */
+    val candidateSource: CandidateSource? = null,
 )
 
 data class RecommendationSignal(

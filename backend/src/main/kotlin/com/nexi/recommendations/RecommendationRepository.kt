@@ -1,23 +1,34 @@
 package com.nexi.recommendations
 
 import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
 interface RecommendationRepository {
     val personalizationAvailable: Boolean
     fun append(events: List<RecommendationEvent>): Int
-    fun recentSignals(userId: UUID, limit: Int): List<RecommendationSignal>
+
+    /**
+     * `notAfter` sıralamayı tekrar üretilebilir kılar: ikinci sayfa
+     * hesaplanırken araya giren yeni olaylar sıralamayı kaydırırsa aynı
+     * gönderi iki sayfada birden çıkardı.
+     */
+    fun recentSignals(userId: UUID, limit: Int, notAfter: Instant? = null): List<RecommendationSignal>
     fun profileStats(userId: UUID): RecommendationProfileStats
     fun clear(userId: UUID)
+
+    /** Kullanıcının gizlediği gönderi; bir daha aday havuzuna girmez. */
+    fun hide(userId: UUID, postId: UUID, now: Instant)
 }
 
 object EmptyRecommendationRepository : RecommendationRepository {
     override val personalizationAvailable = false
     override fun append(events: List<RecommendationEvent>) = 0
-    override fun recentSignals(userId: UUID, limit: Int) = emptyList<RecommendationSignal>()
+    override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?) = emptyList<RecommendationSignal>()
     override fun profileStats(userId: UUID) = RecommendationProfileStats(0, null)
     override fun clear(userId: UUID) = Unit
+    override fun hide(userId: UUID, postId: UUID, now: Instant) = Unit
 }
 
 class JdbcRecommendationRepository(private val dataSource: DataSource) : RecommendationRepository {
@@ -31,8 +42,8 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                    (id, user_id, post_id, client_event_id, session_id, feed_request_id, event_type,
                     surface, position, dwell_millis, completion_ratio, local_hour,
                     timezone_offset_minutes, target_feature, occurred_at, received_at,
-                    schema_version, app_version, platform)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    schema_version, app_version, platform, candidate_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (user_id, client_event_id) DO NOTHING"""
             ).use { statement ->
                 events.forEach { event ->
@@ -55,6 +66,7 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                     statement.setInt(17, event.schemaVersion)
                     statement.setString(18, event.appVersion)
                     statement.setString(19, event.platform?.wireName)
+                    statement.setString(20, event.candidateSource?.name)
                     statement.addBatch()
                 }
                 statement.executeBatch().sumOf { if (it > 0) it else 0 }
@@ -62,7 +74,21 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
         }
     }
 
-    override fun recentSignals(userId: UUID, limit: Int): List<RecommendationSignal> =
+    override fun hide(userId: UUID, postId: UUID, now: Instant) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """INSERT INTO hidden_posts (user_id, post_id, created_at) VALUES (?, ?, ?)
+                   ON CONFLICT (user_id, post_id) DO NOTHING"""
+            ).use { statement ->
+                statement.setObject(1, userId)
+                statement.setObject(2, postId)
+                statement.setTimestamp(3, Timestamp.from(now))
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recentSignals(userId: UUID, limit: Int, notAfter: Instant?): List<RecommendationSignal> =
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """SELECT re.event_type, re.post_id, re.dwell_millis, re.completion_ratio,
@@ -83,12 +109,15 @@ class JdbcRecommendationRepository(private val dataSource: DataSource) : Recomme
                           END AS media_type
                    FROM recommendation_events re
                    LEFT JOIN posts p ON p.id = re.post_id
-                   WHERE re.user_id = ?
+                   WHERE re.user_id = ? AND (CAST(? AS TIMESTAMPTZ) IS NULL OR re.occurred_at <= ?)
                    ORDER BY re.occurred_at DESC
                    LIMIT ?"""
             ).use { statement ->
+                val cutoff = notAfter?.let(Timestamp::from)
                 statement.setObject(1, userId)
-                statement.setInt(2, limit.coerceIn(1, 5_000))
+                statement.setTimestamp(2, cutoff)
+                statement.setTimestamp(3, cutoff)
+                statement.setInt(4, limit.coerceIn(1, 5_000))
                 statement.executeQuery().use { results ->
                     buildList {
                         while (results.next()) {

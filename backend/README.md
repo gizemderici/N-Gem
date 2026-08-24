@@ -52,7 +52,7 @@ Bu testler normal birim testlerinden ayrı tutulur:
 .\gradlew.bat integrationTest --no-daemon
 ```
 
-`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V15`
+`integrationTest`, Testcontainers ile geçici bir PostgreSQL başlatır; `V1–V16`
 migration zincirini ve eş zamanlı token tüketme, takip/beğeni/kaydetme, doğrudan
 konuşma oluşturma, medya bağlama, bildirim, şikâyet ve hikâye görüntüleme
 senaryolarını gerçek SQL üzerinde doğrular. GitHub Actions, `Backend` dalına her
@@ -339,21 +339,43 @@ GET /api/v1/posts/feed?limit=20&personalized=false
 
 İlk sayfada geçerli oturum ve saat bağlamı gönderildiğinde `nexi-contextual-v1` sıralayıcısı kullanılır. Yanıt `requestId`, `modelVersion` ve gönderi başına okunabilir `recommendationReason` alanlarını içerir. `personalized=false` olduğunda profil okunmaz, sunum olayı yazılmaz ve kronolojik akış döner. Kişiselleştirme deposu yapılandırılmamış test/yerel bağlamlarda da kronolojik fallback korunur. Yazar e-postası akışta paylaşılmaz.
 
-#### İki akış ucunun görev ayrımı
+#### Tek akış politikası
 
-Sistemde iki akış ucu var ve ikisi aynı şey değil. Hangisinin ne yaptığı
-belirsiz kaldığı için mobil taraf yalnızca birini çağırıyor, diğerinin okuduğu
-veri de hiç kullanılmıyordu.
+`GET /api/v1/feed` ve `GET /api/v1/posts/feed` **aynı** politikaya bağlı ve
+aynı yanıtı veriyor. Eskiden ikisi ayrı sistemdi: biri `user_topics`
+sıralamasından katmanlı karışım üretiyor, diğeri davranıştan öğreniyordu.
+Mobil taraf yalnızca ikincisini çağırdığı için seçilen ilgi alanları hiçbir
+zaman okunmuyordu. Konu tercihi artık sıralamanın içindeki bir aday kaynağı.
 
-| Uç | Girdi | Sıralama | Durum |
-|---|---|---|---|
-| `GET /api/v1/posts/feed` | Oturum, yerel saat, `personalized` | `nexi-contextual-v1`; davranış sinyallerinden öğrenir | Mobil uygulamaların çağırdığı akış |
-| `GET /api/v1/feed` | Yalnızca imleç ve limit | Kullanıcının `user_topics` sıralamasından %70/%20/%10 katmanlı karışım | Açık tercih akışı; öğrenme yok |
+**Aday kaynakları** (`candidateSource`), öncelik sırasıyla:
 
-İkisi AI Faz 2'de tek politika altında birleşecek. O güne kadar geçerli kural:
-davranıştan öğrenen her şey `posts/feed`'e, kullanıcının kendi seçtiği konu
-sıralaması `feed`'e aittir. Yeni bir aday kaynağı ya da sıralama sinyali
-eklenecekse `posts/feed` tarafına eklenir.
+| Kaynak | Koşul |
+|---|---|
+| `FOLLOWING` | Yazar takip ediliyor |
+| `PRIORITY_TOPIC` | Kullanıcının ilk üç konusundan biri |
+| `OTHER_TOPIC` | Seçtiği ama alt sıradaki konulardan biri |
+| `RELATED_TOPIC` | Seçtiği konularla komşu bir konu |
+| `POPULAR` | En az 3 beğeni/yorum |
+| `NEW_CREATOR` | Yazarın 5 veya daha az takipçisi var |
+| `DISCOVERY` | Yukarıdakilerin dışında |
+
+Bir gönderi birden çok kaynağa uyabilir; tekilleştirmede listedeki ilk kaynak
+kazanır ve o etiket sunum kaydına yazılır. Takip en başta olduğu için havuz
+dolsa bile takip içeriği elenmez.
+
+Engellenen kullanıcıların ve kullanıcının gizlediği gönderiler sorgunun
+içinde, sıralamadan **önce** elenir — hiçbir aday havuzuna girmezler.
+
+**Sayfalama.** İlk sayfa aday kümesini ve davranış sinyallerini `rankedAt`
+anına dondurur, sonraki sayfalar bu anı imleçten geri taşır. Puan imleçte
+taşınmıyor: dondurulmuş girdiyle sıralama tekrar üretilebilir olduğu için
+konum yetiyor, ve konum tabanlı sayfalama aynı gönderinin iki sayfada
+çıkmasını yapısal olarak imkânsız kılıyor. Saat bağlamı da imleçte, yoksa
+ikinci sayfa başka bir saatte istendiğinde sıralama kayardı.
+
+Havuz en fazla 300 aday tutar; bu aynı zamanda kişiselleştirilmiş akışın
+derinliği (20'lik sayfalarla 15 sayfa). `personalized=false` verildiğinde
+profil okunmaz, sunum olayı yazılmaz ve kronolojik akış döner.
 
 ### Gönderi işlemleri
 

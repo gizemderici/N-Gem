@@ -29,6 +29,15 @@ class RecommendationService(
             }
         }
         val accepted = repository.append(parsed)
+
+        // Gizleme yalnızca sıralamada olumsuz puan olarak kalırsa gönderi
+        // ertesi gün yine akışa girer. Kullanıcının açık tercihi olduğu için
+        // aday havuzundan kalıcı olarak çıkarılmalı.
+        parsed.filter { it.eventType == RecommendationEventType.CONTENT_HIDDEN }
+            .mapNotNull(RecommendationEvent::postId)
+            .distinct()
+            .forEach { postId -> repository.hide(userId, postId, now) }
+
         return RecommendationEventBatchResponse(accepted, parsed.size - accepted)
     }
 

@@ -6,11 +6,7 @@ import com.nexi.media.ObjectStorage
 import com.nexi.notifications.NotificationSink
 import com.nexi.notifications.NotificationTargetType
 import com.nexi.notifications.NotificationType
-import com.nexi.recommendations.ContextualRanker
 import com.nexi.recommendations.EmptyRecommendationRepository
-import com.nexi.recommendations.EventPlatform
-import com.nexi.recommendations.FeedRecommendationContext
-import com.nexi.recommendations.RecommendationEvent
 import com.nexi.recommendations.RecommendationEventType
 import com.nexi.recommendations.RecommendationRepository
 import com.nexi.recommendations.serverEvent
@@ -20,7 +16,6 @@ import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneOffset
 import java.util.Base64
 import java.util.UUID
 
@@ -29,7 +24,6 @@ class PostService(
     private val storage: ObjectStorage,
     private val clock: Clock = Clock.systemUTC(),
     private val recommendationRepository: RecommendationRepository = EmptyRecommendationRepository,
-    private val ranker: ContextualRanker = ContextualRanker(),
     private val notifications: NotificationSink = NotificationSink.NOOP,
 ) {
     private val logger = LoggerFactory.getLogger(PostService::class.java)
@@ -82,22 +76,6 @@ class PostService(
             ?: throw ApiException(HttpStatusCode.NotFound, "POST_NOT_FOUND", "Gönderi bulunamadı.")
     )
 
-    fun feed(
-        viewerId: UUID,
-        rawCursor: String?,
-        requestedLimit: Int?,
-        recommendationContext: FeedRecommendationContext? = null,
-        personalizationEnabled: Boolean = true,
-    ): FeedResponse {
-        val limit = (requestedLimit ?: 20).coerceIn(1, 50)
-        val cursor = rawCursor?.let(::decodeCursor)
-        if (cursor == null && personalizationEnabled && recommendationRepository.personalizationAvailable) {
-            return personalizedFeed(viewerId, limit, recommendationContext)
-        }
-
-        return page(cursor, limit) { pageCursor, size -> repository.feed(viewerId, pageCursor, size) }
-    }
-
     /** Profil ekranının listesi: kullanıcının kendi gönderileri, kronolojik. */
     fun postsByOwner(ownerId: UUID, viewerId: UUID, rawCursor: String?, requestedLimit: Int?): FeedResponse =
         page(
@@ -119,55 +97,6 @@ class PostService(
         val items = details.take(limit)
         val nextCursor = if (hasMore) items.lastOrNull()?.post?.let { encodeCursor(it) } else null
         return FeedResponse(items.map(::response), nextCursor)
-    }
-
-    private fun personalizedFeed(
-        viewerId: UUID,
-        limit: Int,
-        requestedContext: FeedRecommendationContext?,
-    ): FeedResponse {
-        val now = clock.instant()
-        val context = requestedContext ?: FeedRecommendationContext(
-            localHour = now.atZone(ZoneOffset.UTC).hour,
-            timezoneOffsetMinutes = 0,
-            sessionId = UUID.randomUUID(),
-        )
-        val candidates = repository.feed(viewerId, null, 200)
-        val signals = recommendationRepository.recentSignals(viewerId, 2_000)
-        val ranked = ranker.rank(viewerId, candidates, signals, context, now).take(limit)
-        val requestId = UUID.randomUUID()
-        recommendationRepository.append(
-            ranked.mapIndexed { index, rankedPost ->
-                RecommendationEvent(
-                    id = UUID.randomUUID(),
-                    userId = viewerId,
-                    postId = rankedPost.details.post.id,
-                    clientEventId = UUID.randomUUID(),
-                    sessionId = context.sessionId,
-                    feedRequestId = requestId,
-                    // Sunum kaydı. Gerçek gösterimi istemci `content_impression`
-                    // ile bildirir; ikisini aynı tipte toplamak eğitim verisini
-                    // "gösterildi" sanılan içerikle kirletiyordu.
-                    eventType = RecommendationEventType.FEED_SERVED,
-                    surface = "feed",
-                    position = index,
-                    dwellMillis = null,
-                    completionRatio = null,
-                    localHour = context.localHour,
-                    timezoneOffsetMinutes = context.timezoneOffsetMinutes,
-                    targetFeature = null,
-                    occurredAt = now,
-                    receivedAt = now,
-                    platform = EventPlatform.BACKEND,
-                )
-            }
-        )
-        return FeedResponse(
-            items = ranked.map { response(it.details, it.reason) },
-            nextCursor = null,
-            requestId = requestId.toString(),
-            modelVersion = ranker.modelVersion,
-        )
     }
 
     fun delete(ownerId: UUID, postId: UUID) {
